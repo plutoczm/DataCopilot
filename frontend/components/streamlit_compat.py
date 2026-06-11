@@ -3,6 +3,10 @@ class _NoopStreamlit:
 
     def __getattr__(self, name):
         def _noop(*args, **kwargs):
+            if name == "Page":
+                return _NoopPage(args[0] if args else None)
+            if name == "navigation":
+                return _NoopNavigation(args[0] if args else [])
             if name in {"button", "form_submit_button", "checkbox"}:
                 return False
             if name in {"text_area", "text_input", "selectbox"}:
@@ -29,6 +33,26 @@ class _NoopStreamlit:
 
     def __exit__(self, exc_type, exc, tb):
         return False
+
+
+class _NoopPage:
+    def __init__(self, target):
+        self.target = target
+
+    def run(self):
+        if callable(self.target):
+            return self.target()
+        return None
+
+
+class _NoopNavigation:
+    def __init__(self, pages):
+        self.pages = pages
+
+    def run(self):
+        if self.pages:
+            return self.pages[0].run()
+        return None
 
 
 try:

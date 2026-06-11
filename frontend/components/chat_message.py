@@ -15,14 +15,14 @@ def render(role: str = "assistant", content: str = "") -> None:
 def render_citations(citations: list[dict[str, Any]]) -> None:
     if not citations:
         return
-    with st.expander("Citations", expanded=False):
+    with st.expander("引用来源", expanded=False):
         for citation in citations:
             st.markdown(
                 "\n".join(
                     [
-                        f"**{citation.get('document_name', 'document')}**",
-                        f"Chunk: `{citation.get('chunk_reference', '-')}`",
-                        f"Score: `{citation.get('similarity_score', 0):.4f}`",
+                        f"**{citation.get('document_name', '文档')}**",
+                        f"片段：`{citation.get('chunk_reference', '-')}`",
+                        f"相似度：`{citation.get('similarity_score', 0):.4f}`",
                     ]
                 )
             )

@@ -136,6 +136,11 @@ def test_streamlit_pages_expose_render_functions() -> None:
         module = importlib.import_module(module_name)
         assert hasattr(module, "render") or hasattr(module, "main") or hasattr(module, "get_client")
 
+    theme = importlib.import_module("frontend.components.theme")
+    assert hasattr(theme, "apply_theme")
+    assert hasattr(theme, "hero")
+    assert hasattr(theme, "card_grid")
+
 
 def test_streamlit_page_scripts_import_when_run_from_pages_directory(monkeypatch) -> None:
     project_root = Path.cwd().resolve()
@@ -205,3 +210,33 @@ def test_frontend_dockerfile_exposes_streamlit_port() -> None:
     assert "EXPOSE 8501" in content
     assert "streamlit" in content
     assert "frontend/app.py" in content
+
+
+def test_frontend_uses_chinese_navigation_and_theme() -> None:
+    app_content = Path("frontend/app.py").read_text(encoding="utf-8")
+    theme_content = Path("frontend/components/theme.py").read_text(encoding="utf-8")
+
+    for label in ("首页", "智能问答", "知识库", "Text2SQL", "SQL 审查", "数仓设计"):
+        assert label in app_content
+
+    assert "st.Page" in app_content
+    assert "st.navigation" in app_content
+    assert "@keyframes fadeUp" in theme_content
+    assert "prefers-reduced-motion" in theme_content
+    assert "datacopilot-hero" in theme_content
+
+
+def test_frontend_pages_use_chinese_display_text() -> None:
+    expected_text = {
+        "frontend/app.py": ["数据工程 AI 工作台", "系统状态", "工作区"],
+        "frontend/pages/chat.py": ["智能问答", "上下文设置", "向 DataPilot-AI 提问"],
+        "frontend/pages/knowledge_base.py": ["知识库", "上传文档", "文档列表", "知识问答"],
+        "frontend/pages/text2sql.py": ["自然语言生成 SQL", "业务需求", "生成 SQL"],
+        "frontend/pages/sql_review.py": ["SQL 审查", "风险等级", "优化建议"],
+        "frontend/pages/warehouse_design.py": ["数仓设计", "业务需求", "生成数仓方案"],
+    }
+
+    for file_name, labels in expected_text.items():
+        content = Path(file_name).read_text(encoding="utf-8")
+        for label in labels:
+            assert label in content

@@ -13,32 +13,38 @@ _bootstrap_project_root()
 import frontend.bootstrap  # noqa: E402,F401
 
 from frontend.components.api_client import get_client
-from frontend.components.sidebar import render as render_sidebar
 from frontend.components.streamlit_compat import st
+from frontend.components.theme import apply_theme, card_grid, hero
 
 
 def render() -> None:
-    st.set_page_config(page_title="Warehouse Designer", page_icon="DC", layout="wide")
-    render_sidebar()
-    st.title("Warehouse Designer")
+    apply_theme()
+    hero("数仓设计", "根据业务需求生成 ODS、DWD、DWS、ADS 分层方案、指标定义和 Hive DDL。")
+    card_grid(
+        [
+            ("分层建模", "自动组织明细层、汇总层和应用层。"),
+            ("指标口径", "沉淀指标定义、计算逻辑和业务含义。"),
+            ("DDL 输出", "生成可复制的建表 SQL，便于继续落地。"),
+        ]
+    )
 
-    requirement = st.text_area("Business Requirement", value="设计电商订单分析数仓", height=120)
-    use_rag = st.checkbox("Use RAG context", value=True)
+    requirement = st.text_area("业务需求", value="设计电商订单分析数仓", height=120)
+    use_rag = st.checkbox("使用知识库上下文", value=True)
 
-    if not st.button("Generate Warehouse Design", type="primary"):
+    if not st.button("生成数仓方案", type="primary"):
         return
 
     try:
         result = get_client().warehouse_design(requirement, use_rag=use_rag)
-        st.success("Warehouse design generated")
+        st.success("数仓方案已生成")
         st.download_button(
-            "Export Results",
+            "导出结果",
             data=json.dumps(result, ensure_ascii=False, indent=2),
             file_name="warehouse_design.json",
             mime="application/json",
         )
 
-        layer_tabs = st.tabs(["ODS", "DWD", "DWS", "ADS", "Metrics", "DDL", "Recommendations"])
+        layer_tabs = st.tabs(["ODS", "DWD", "DWS", "ADS", "指标", "DDL", "建议"])
         for tab, key in zip(layer_tabs[:4], ["ods", "dwd", "dws", "ads"], strict=True):
             with tab:
                 _render_tables(result.get(key, []))
@@ -59,12 +65,12 @@ def render() -> None:
             for recommendation in result.get("recommendations", []):
                 st.write(f"- {recommendation}")
     except Exception as exc:
-        st.error(f"Warehouse design failed: {exc}")
+        st.error(f"数仓设计失败：{exc}")
 
 
 def _render_tables(tables: list[dict]) -> None:
     for table in tables:
-        with st.expander(table.get("name", "table"), expanded=True):
+        with st.expander(table.get("name", "表"), expanded=True):
             st.write(table.get("description", ""))
             st.json(table.get("columns", []))
 

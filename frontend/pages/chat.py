@@ -13,29 +13,35 @@ import frontend.bootstrap  # noqa: E402,F401
 
 from frontend.components.api_client import get_client
 from frontend.components.chat_message import render_citations, render_message
-from frontend.components.sidebar import render as render_sidebar
 from frontend.components.streamlit_compat import st
+from frontend.components.theme import apply_theme, card_grid, hero
 
 
 def render() -> None:
-    st.set_page_config(page_title="DataPilot-AI Agent Chat", page_icon="DC", layout="wide")
-    render_sidebar()
-    st.title("Agent Chat")
+    apply_theme()
+    hero("智能问答", "用自然语言触发 RAG、Text2SQL、SQL 审查和数仓设计，让数据工程任务从一个入口开始。")
+    card_grid(
+        [
+            ("自动意图识别", "根据问题内容选择最合适的工具链。"),
+            ("流式响应", "回答生成过程中实时展示意图和路由路径。"),
+            ("结构化结果", "SQL、审查分数、引用来源和数仓层级可直接查看。"),
+        ]
+    )
 
     st.session_state.setdefault("chat_history", [])
-    with st.expander("Context Settings", expanded=False):
-        collection_name = st.text_input("Collection", value="knowledge_base")
+    with st.expander("上下文设置", expanded=False):
+        collection_name = st.text_input("知识库集合", value="knowledge_base")
         top_k = st.slider("Top K", min_value=1, max_value=20, value=5)
-        engine = st.selectbox("SQL Engine", ["hive", "spark_sql", "mysql", "clickhouse"])
-        schema_context = st.text_area("Schema Context", height=120)
-        use_rag = st.checkbox("Use RAG for specialist tools", value=False)
+        engine = st.selectbox("SQL 引擎", ["hive", "spark_sql", "mysql", "clickhouse"])
+        schema_context = st.text_area("表结构上下文", height=120)
+        use_rag = st.checkbox("专业工具启用 RAG 上下文", value=False)
 
     for item in st.session_state["chat_history"]:
         render_message(item["role"], item["content"])
         render_citations(item.get("citations", []))
         _render_agent_result(item.get("result"))
 
-    prompt = st.chat_input("Ask DataPilot-AI anything")
+    prompt = st.chat_input("向 DataPilot-AI 提问，例如：统计最近7天活跃用户并检查SQL")
     if not prompt:
         return
 
@@ -59,9 +65,9 @@ def render() -> None:
                 if event["event"] == "metadata":
                     data = event["data"]
                     st.caption(
-                        "Intent: "
+                        "意图："
                         f"{data.get('intent', '-')}"
-                        " | Route: "
+                        " | 路由："
                         f"{' -> '.join(data.get('routing_path', []))}"
                     )
                 if event["event"] == "token":
@@ -81,7 +87,7 @@ def render() -> None:
                 }
             )
         except Exception as exc:
-            st.error(f"Streaming failed: {exc}")
+            st.error(f"流式问答失败：{exc}")
 
 
 def _extract_citations(result):
@@ -105,11 +111,11 @@ def _render_agent_result(result) -> None:
     review = result.get("review") if isinstance(result.get("review"), dict) else result
     if isinstance(review, dict) and "risk_level" in review:
         st.caption(
-            f"Risk: {review.get('risk_level', '-')} | Score: {review.get('score', '-')}/100"
+            f"风险：{review.get('risk_level', '-')} | 分数：{review.get('score', '-')}/100"
         )
     if "ods" in result and "dwd" in result:
         st.caption(
-            "Warehouse layers: "
+            "数仓层级："
             f"ODS {len(result.get('ods', []))}, "
             f"DWD {len(result.get('dwd', []))}, "
             f"DWS {len(result.get('dws', []))}, "
