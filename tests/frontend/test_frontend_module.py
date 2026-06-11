@@ -90,6 +90,25 @@ def test_backend_client_defaults_to_docker_backend_url(monkeypatch) -> None:
     assert client.base_url == "http://backend:8000"
 
 
+def test_backend_client_ignores_proxy_environment_by_default(monkeypatch) -> None:
+    created_clients: list[dict] = []
+
+    class RecordingHTTPClient:
+        def __init__(self, **kwargs) -> None:
+            created_clients.append(kwargs)
+
+        def close(self) -> None:
+            pass
+
+    monkeypatch.setenv("HTTP_PROXY", "http://127.0.0.1:3505")
+    monkeypatch.setattr("frontend.services.backend_client.httpx.Client", RecordingHTTPClient)
+
+    client = BackendClient(base_url="http://127.0.0.1:8000")
+    client.close()
+
+    assert created_clients[0]["trust_env"] is False
+
+
 def test_backend_client_calls_expected_api_paths() -> None:
     http_client = StubHTTPClient()
     client = BackendClient(http_client=http_client)

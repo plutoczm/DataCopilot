@@ -15,6 +15,7 @@ from backend.app.application.warehouse_design.models import (
 from backend.app.application.warehouse_design.prompt_builder import WarehouseDesignPromptBuilder
 from backend.app.application.warehouse_design.design_service import WarehouseDesignService
 from backend.app.domain.ports.llm_provider import LLMMessage, LLMResponse, LLMUsage
+from backend.app.infrastructure.llm.exceptions import LLMProviderError
 from backend.app.main import create_app
 from backend.app.presentation.api.dependencies.providers import get_warehouse_design_service
 
@@ -89,6 +90,18 @@ class InvalidJSONLLMProvider(FakeLLMProvider):
         )
 
 
+class FailingLLMProvider(FakeLLMProvider):
+    async def chat(
+        self,
+        messages: Sequence[LLMMessage],
+        *,
+        temperature: float | None = None,
+        max_tokens: int | None = None,
+    ) -> LLMResponse:
+        self.messages = list(messages)
+        raise LLMProviderError("DeepSeek request failed", provider="deepseek", retryable=True)
+
+
 class FakeRAGService:
     def __init__(self) -> None:
         self.called = False
@@ -101,6 +114,11 @@ class FakeRAGService:
             citations=[],
             metadata={"retrieved_count": 1},
         )
+
+
+class FailingRAGService:
+    async def answer(self, question: str, **kwargs) -> RAGResponse:
+        raise LLMProviderError("RAG answer generation failed", provider="deepseek", retryable=True)
 
 
 class FakeText2SQLService:
@@ -202,6 +220,34 @@ async def test_design_service_falls_back_to_template_when_llm_returns_invalid_js
     assert result.ads
     assert result.metadata["llm_payload_used"] is False
     assert result.metadata["llm_parse_error"] == "LLM response must be valid JSON"
+
+
+async def test_design_service_falls_back_to_template_when_llm_provider_fails() -> None:
+    service = WarehouseDesignService(llm_provider=FailingLLMProvider())
+
+    result = await service.design(requirement="设计电商订单分析数仓", use_rag=False)
+
+    assert result.ods
+    assert result.dwd
+    assert result.dws
+    assert result.ads
+    assert result.metadata["llm_payload_used"] is False
+    assert result.metadata["llm_error"] == "DeepSeek request failed"
+
+
+async def test_design_service_falls_back_to_template_when_rag_fails() -> None:
+    llm = FakeLLMProvider()
+    service = WarehouseDesignService(llm_provider=llm, rag_service=FailingRAGService())
+
+    result = await service.design(requirement="设计电商订单分析数仓", use_rag=True)
+
+    assert result.ods
+    assert result.dwd
+    assert result.dws
+    assert result.ads
+    assert result.metadata["rag_used"] is True
+    assert result.metadata["rag_context"] == ""
+    assert result.metadata["rag_error"] == "RAG answer generation failed"
 
 
 async def test_design_service_generates_domain_specific_metrics() -> None:

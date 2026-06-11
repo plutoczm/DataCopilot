@@ -54,28 +54,37 @@ class WarehouseDesignService:
         use_rag: bool = False,
         rag_collection_name: str = "knowledge_base",
     ) -> WarehouseDesignResult:
-        rag_context = await self._retrieve_rag_context(
-            requirement,
-            use_rag=use_rag,
-            collection_name=rag_collection_name,
-        )
+        rag_context = None
+        rag_error: str | None = None
+        try:
+            rag_context = await self._retrieve_rag_context(
+                requirement,
+                use_rag=use_rag,
+                collection_name=rag_collection_name,
+            )
+        except Exception as exc:
+            rag_error = self._error_message(exc)
+
         llm_payload: dict[str, Any] = {}
+        llm_error: str | None = None
         llm_parse_error: str | None = None
         token_usage = None
         if self.llm_provider is not None:
-            response = await self.llm_provider.chat(
-                self.prompt_builder.build_messages(
-                    requirement=requirement,
-                    rag_context=rag_context,
-                ),
-                temperature=0.0,
-                max_tokens=3000,
-            )
-            token_usage = response.usage
             try:
+                response = await self.llm_provider.chat(
+                    self.prompt_builder.build_messages(
+                        requirement=requirement,
+                        rag_context=rag_context,
+                    ),
+                    temperature=0.0,
+                    max_tokens=3000,
+                )
+                token_usage = response.usage
                 llm_payload = self._parse_llm_payload(response.content)
             except WarehouseDesignGenerationError as exc:
                 llm_parse_error = str(exc)
+            except Exception as exc:
+                llm_error = self._error_message(exc)
 
         result = self._merge_with_template(requirement, llm_payload)
         if token_usage is not None:
@@ -87,6 +96,10 @@ class WarehouseDesignService:
                 "llm_payload_used": bool(llm_payload),
             }
         )
+        if rag_error is not None:
+            result.metadata["rag_error"] = rag_error
+        if llm_error is not None:
+            result.metadata["llm_error"] = llm_error
         if llm_parse_error is not None:
             result.metadata["llm_parse_error"] = llm_parse_error
         return result
@@ -106,6 +119,10 @@ class WarehouseDesignService:
             top_k=5,
         )
         return response.answer
+
+    @staticmethod
+    def _error_message(exc: Exception) -> str:
+        return str(exc) or exc.__class__.__name__
 
     def _parse_llm_payload(self, content: str) -> dict[str, Any]:
         stripped = content.strip()

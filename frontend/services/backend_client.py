@@ -17,10 +17,15 @@ class BackendClient:
         base_url: str | None = None,
         timeout: float = 60.0,
         http_client: Any | None = None,
+        trust_env: bool = False,
     ) -> None:
         self.base_url = (base_url or os.getenv("BACKEND_URL") or DEFAULT_BACKEND_URL).rstrip("/")
         self._owns_client = http_client is None
-        self.client = http_client or httpx.Client(base_url=self.base_url, timeout=timeout)
+        self.client = http_client or httpx.Client(
+            base_url=self.base_url,
+            timeout=timeout,
+            trust_env=trust_env,
+        )
 
     def health(self) -> dict[str, Any]:
         return self._json(self.client.get("/health"))
