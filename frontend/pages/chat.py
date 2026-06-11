@@ -1,3 +1,16 @@
+from pathlib import Path
+import sys
+
+
+def _bootstrap_project_root() -> None:
+    project_root = str(Path(__file__).resolve().parents[2])
+    if project_root not in sys.path:
+        sys.path.insert(0, project_root)
+
+
+_bootstrap_project_root()
+import frontend.bootstrap  # noqa: E402,F401
+
 from frontend.components.api_client import get_client
 from frontend.components.chat_message import render_citations, render_message
 from frontend.components.sidebar import render as render_sidebar

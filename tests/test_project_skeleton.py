@@ -46,12 +46,32 @@ def test_backend_and_frontend_package_boundaries_exist() -> None:
         "frontend/components/.gitkeep",
         "frontend/services/.gitkeep",
         "scripts/bootstrap_venv.sh",
+        "scripts/dev.sh",
+        "scripts/stop-dev.sh",
         "docs/environment.md",
     ]
 
     missing = [file for file in required_files if not (PROJECT_ROOT / file).is_file()]
 
     assert missing == []
+
+
+def test_development_scripts_use_project_local_runtime_paths() -> None:
+    dev_script = PROJECT_ROOT / "scripts" / "dev.sh"
+    stop_script = PROJECT_ROOT / "scripts" / "stop-dev.sh"
+
+    dev_content = dev_script.read_text(encoding="utf-8")
+    stop_content = stop_script.read_text(encoding="utf-8")
+
+    assert "PROJECT_ROOT=" in dev_content
+    assert "BACKEND_PORT=\"${BACKEND_PORT:-8000}\"" in dev_content
+    assert "FRONTEND_PORT=\"${FRONTEND_PORT:-8502}\"" in dev_content
+    assert "BACKEND_URL=" in dev_content
+    assert "http://127.0.0.1:${BACKEND_PORT}" in dev_content
+    assert "data/logs" in dev_content
+    assert "data/temp" in dev_content
+    assert "frontend-dev.pid" in stop_content
+    assert "backend-dev.pid" in stop_content
 
 
 def test_project_local_virtual_environment_matches_yolov26_style() -> None:

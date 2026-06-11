@@ -1,4 +1,7 @@
 import importlib
+import runpy
+import subprocess
+import sys
 from pathlib import Path
 
 import httpx
@@ -132,6 +135,66 @@ def test_streamlit_pages_expose_render_functions() -> None:
     for module_name in modules:
         module = importlib.import_module(module_name)
         assert hasattr(module, "render") or hasattr(module, "main") or hasattr(module, "get_client")
+
+
+def test_streamlit_page_scripts_import_when_run_from_pages_directory(monkeypatch) -> None:
+    project_root = Path.cwd().resolve()
+    page_files = [
+        project_root / "frontend/pages/chat.py",
+        project_root / "frontend/pages/knowledge_base.py",
+        project_root / "frontend/pages/text2sql.py",
+        project_root / "frontend/pages/sql_review.py",
+        project_root / "frontend/pages/warehouse_design.py",
+    ]
+
+    original_path = list(sys.path)
+    path_without_project_root = [
+        path
+        for path in original_path
+        if Path(path or ".").resolve() != project_root.resolve()
+    ]
+    for page_file in page_files:
+        monkeypatch.setattr(sys, "path", [str(page_file.parent), *path_without_project_root])
+        for module_name in list(sys.modules):
+            if module_name == "frontend" or module_name.startswith("frontend."):
+                monkeypatch.delitem(sys.modules, module_name, raising=False)
+        try:
+            module_globals = runpy.run_path(str(page_file), run_name=f"test_{page_file.stem}")
+        finally:
+            sys.path = list(original_path)
+
+        assert callable(module_globals["render"])
+
+
+def test_streamlit_page_scripts_import_in_clean_subprocess_without_project_root() -> None:
+    project_root = Path.cwd().resolve()
+    script = """
+import runpy
+import sys
+from pathlib import Path
+
+project_root = Path.cwd().resolve()
+page_file = project_root / "frontend/pages/knowledge_base.py"
+sys.path = [
+    str(page_file.parent),
+    *[
+        path
+        for path in sys.path
+        if Path(path or ".").resolve() != project_root
+    ],
+]
+runpy.run_path(str(page_file), run_name="streamlit_page")
+"""
+
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        cwd=project_root,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
 
 
 def test_frontend_dockerfile_exposes_streamlit_port() -> None:
