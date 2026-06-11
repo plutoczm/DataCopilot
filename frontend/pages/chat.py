@@ -14,7 +14,7 @@ import frontend.bootstrap  # noqa: E402,F401
 from frontend.components.api_client import get_client
 from frontend.components.chat_message import render_citations, render_message
 from frontend.components.streamlit_compat import st
-from frontend.components.theme import apply_theme, card_grid, hero
+from frontend.components.theme import apply_theme, card_grid, hero, quick_actions, record_activity
 
 
 def render() -> None:
@@ -29,6 +29,38 @@ def render() -> None:
     )
 
     st.session_state.setdefault("chat_history", [])
+    selected = quick_actions(
+        "演示问题",
+        [
+            {
+                "tag": "知识问答",
+                "title": "什么是 Spark AQE？",
+                "description": "检索 Spark 优化知识并生成可引用解释。",
+                "button_label": "使用该问题",
+                "value": "什么是 Spark AQE？它能解决哪些查询性能问题？",
+            },
+            {
+                "tag": "SQL 工作流",
+                "title": "统计最近7天活跃用户并检查 SQL",
+                "description": "让智能体先生成 SQL，再自动审查风险。",
+                "button_label": "使用该问题",
+                "value": "统计最近7天活跃用户并检查 SQL",
+            },
+            {
+                "tag": "数仓建模",
+                "title": "请帮我设计电商订单分析数仓",
+                "description": "生成 ODS、DWD、DWS、ADS 分层方案。",
+                "button_label": "使用该问题",
+                "value": "请帮我设计电商订单分析数仓",
+            },
+        ],
+        key_prefix="chat-demo",
+    )
+    if selected:
+        st.session_state["chat_prompt_seed"] = selected.get("value", "")
+        st.session_state["chat_prompt_pending"] = True
+        record_activity("智能问答", f"加载演示问题：{selected.get('title', '-')}")
+
     with st.expander("上下文设置", expanded=False):
         collection_name = st.text_input("知识库集合", value="knowledge_base")
         top_k = st.slider("Top K", min_value=1, max_value=20, value=5)
@@ -42,6 +74,8 @@ def render() -> None:
         _render_agent_result(item.get("result"))
 
     prompt = st.chat_input("向 DataPilot-AI 提问，例如：统计最近7天活跃用户并检查SQL")
+    if not prompt and st.session_state.pop("chat_prompt_pending", False):
+        prompt = st.session_state.get("chat_prompt_seed", "")
     if not prompt:
         return
 
@@ -86,6 +120,7 @@ def render() -> None:
                     "result": result,
                 }
             )
+            record_activity("智能问答", f"完成问答：{prompt[:28]}")
         except Exception as exc:
             st.error(f"流式问答失败：{exc}")
 

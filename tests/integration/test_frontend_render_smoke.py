@@ -1,6 +1,6 @@
 from types import SimpleNamespace
 
-from frontend.components import chat_message, sidebar
+from frontend.components import chat_message, sidebar, theme
 from frontend.pages import chat, knowledge_base, sql_review, text2sql, warehouse_design
 
 
@@ -23,6 +23,13 @@ class RenderStreamlit:
                 options = args[1] if len(args) > 1 else []
                 return options[0] if options else ""
             if name in {"text_area", "text_input"}:
+                key = kwargs.get("key")
+                if key:
+                    if key not in self.session_state:
+                        self.session_state[key] = kwargs.get("value") or (
+                            args[1] if len(args) > 1 else args[0] if args else ""
+                        )
+                    return self.session_state[key]
                 return kwargs.get("value") or (args[1] if len(args) > 1 else args[0] if args else "")
             if name == "slider":
                 return kwargs.get("value", 5)
@@ -137,6 +144,7 @@ def test_streamlit_pages_render_with_backend_payloads(monkeypatch) -> None:
     monkeypatch.setattr(sidebar, "st", fake_st)
     monkeypatch.setattr(sidebar, "get_client", lambda: fake_client)
     monkeypatch.setattr(chat_message, "st", fake_st)
+    monkeypatch.setattr(theme, "st", fake_st)
 
     for module in modules:
         monkeypatch.setattr(module, "st", fake_st)
@@ -148,3 +156,26 @@ def test_streamlit_pages_render_with_backend_payloads(monkeypatch) -> None:
     assert "json" in call_names
     assert "download_button" in call_names
     assert "metric" in call_names
+
+
+def test_guided_demo_actions_seed_page_inputs(monkeypatch) -> None:
+    fake_st = RenderStreamlit()
+    fake_client = RenderClient()
+    modules = [chat, text2sql, sql_review, warehouse_design]
+    monkeypatch.setattr(chat_message, "st", fake_st)
+    monkeypatch.setattr(theme, "st", fake_st)
+
+    for module in modules:
+        monkeypatch.setattr(module, "st", fake_st)
+        monkeypatch.setattr(module, "get_client", lambda: fake_client)
+        module.render()
+
+    assert fake_st.session_state["chat_prompt_seed"] == "什么是 Spark AQE？它能解决哪些查询性能问题？"
+    assert fake_st.session_state["text2sql_question"] == "按天统计最近7天活跃用户数，并按省份输出 Top 10"
+    assert "dwd_user_behavior_detail" in fake_st.session_state["text2sql_schema_context"]
+    assert fake_st.session_state["sql_review_sql"].startswith("SELECT *")
+    assert fake_st.session_state["warehouse_design_requirement"] == "设计电商订单分析数仓，覆盖下单、支付、退款和履约分析"
+    assert {
+        "module": "数仓设计",
+        "description": "加载电商订单主题示例",
+    } in fake_st.session_state["recent_activity"]

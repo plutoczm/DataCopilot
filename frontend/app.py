@@ -13,7 +13,15 @@ import frontend.bootstrap  # noqa: E402,F401
 
 from frontend.components.api_client import get_client
 from frontend.components.streamlit_compat import st
-from frontend.components.theme import apply_theme, card_grid, hero, status_badge
+from frontend.components.theme import (
+    apply_theme,
+    card_grid,
+    hero,
+    quick_actions,
+    recent_activity,
+    record_activity,
+    status_badge,
+)
 from frontend.pages import chat, knowledge_base, sql_review, text2sql, warehouse_design
 
 
@@ -63,6 +71,41 @@ def render() -> None:
         ]
     )
 
+    selected = quick_actions(
+        "演示任务",
+        [
+            {
+                "tag": "知识问答",
+                "title": "什么是 Spark AQE？",
+                "description": "加载一个适合知识库问答的 Spark 优化问题。",
+                "button_label": "发送到智能问答",
+                "target": "chat",
+                "value": "什么是 Spark AQE？它能解决哪些查询性能问题？",
+            },
+            {
+                "tag": "SQL 工作流",
+                "title": "统计最近7天活跃用户并检查 SQL",
+                "description": "准备一个 Text2SQL 到 SQL 审查的组合任务。",
+                "button_label": "填入 Text2SQL",
+                "target": "text2sql",
+                "value": "按天统计最近7天活跃用户数，并按省份输出 Top 10",
+            },
+            {
+                "tag": "数仓建模",
+                "title": "设计电商订单分析数仓",
+                "description": "准备一个 ODS/DWD/DWS/ADS 分层建模任务。",
+                "button_label": "填入数仓设计",
+                "target": "warehouse",
+                "value": "设计电商订单分析数仓，覆盖下单、支付、退款和履约分析",
+            },
+        ],
+        key_prefix="home-demo",
+    )
+    if selected:
+        _apply_home_demo(selected)
+
+    recent_activity("最近操作")
+
 
 def main() -> None:
     pages = [
@@ -75,6 +118,26 @@ def main() -> None:
     ]
     navigation = st.navigation(pages)
     navigation.run()
+
+
+def _apply_home_demo(action: dict[str, str]) -> None:
+    target = action.get("target")
+    value = action.get("value", "")
+    if target == "chat":
+        st.session_state["chat_prompt_seed"] = value
+        st.session_state["chat_prompt_pending"] = True
+        record_activity("智能问答", "加载 Spark AQE 演示问题")
+    elif target == "text2sql":
+        st.session_state["text2sql_question"] = value
+        st.session_state["text2sql_schema_context"] = (
+            "dwd_user_behavior_detail(user_id bigint, event_time timestamp, province string, "
+            "event_name string, dt string)\n"
+            "dim_user(user_id bigint, user_level string, province string)"
+        )
+        record_activity("Text2SQL", "加载活跃用户分析演示")
+    elif target == "warehouse":
+        st.session_state["warehouse_design_requirement"] = value
+        record_activity("数仓设计", "加载电商订单主题演示")
 
 
 if __name__ == "__main__":

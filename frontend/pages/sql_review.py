@@ -13,7 +13,7 @@ import frontend.bootstrap  # noqa: E402,F401
 
 from frontend.components.api_client import get_client
 from frontend.components.streamlit_compat import st
-from frontend.components.theme import apply_theme, card_grid, hero
+from frontend.components.theme import apply_theme, card_grid, hero, quick_actions, record_activity
 
 
 ENGINE_OPTIONS = {
@@ -35,9 +35,41 @@ def render() -> None:
         ]
     )
 
+    selected = quick_actions(
+        "一键示例",
+        [
+            {
+                "tag": "Spark 分区缺失",
+                "title": "宽表全量扫描",
+                "description": "包含 SELECT * 和时间字段过滤，适合演示分区裁剪建议。",
+                "button_label": "填入示例",
+                "sql": "SELECT * FROM dwd_order_detail WHERE create_time >= '2026-06-01'",
+            },
+            {
+                "tag": "SELECT 星号风险",
+                "title": "聚合前未裁剪字段",
+                "description": "展示字段裁剪、分区过滤和聚合性能建议。",
+                "button_label": "填入示例",
+                "sql": (
+                    "SELECT *\n"
+                    "FROM dwd_user_behavior_detail\n"
+                    "WHERE event_name IN ('view', 'pay')"
+                ),
+            },
+        ],
+        key_prefix="sql-review-demo",
+    )
+    if selected:
+        st.session_state["sql_review_sql"] = selected.get("sql", "")
+        record_activity("SQL 审查", f"加载{selected.get('tag', '示例')}示例")
+
+    st.session_state.setdefault(
+        "sql_review_sql",
+        "SELECT * FROM dwd_order_detail WHERE create_time >= '2026-06-01'",
+    )
     sql = st.text_area(
         "SQL",
-        value="SELECT * FROM dwd_order_detail WHERE create_time >= '2026-06-01'",
+        key="sql_review_sql",
         height=260,
     )
     engine_label = st.selectbox("SQL 引擎", list(ENGINE_OPTIONS.keys()))
@@ -68,6 +100,7 @@ def render() -> None:
 
         st.subheader("LLM 解释")
         st.write(result.get("llm_explanation", ""))
+        record_activity("SQL 审查", f"完成 SQL 审查：{result.get('risk_level', '-')}")
     except Exception as exc:
         st.error(f"SQL 审查失败：{exc}")
 

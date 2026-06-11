@@ -14,7 +14,7 @@ import frontend.bootstrap  # noqa: E402,F401
 
 from frontend.components.api_client import get_client
 from frontend.components.streamlit_compat import st
-from frontend.components.theme import apply_theme, card_grid, hero
+from frontend.components.theme import apply_theme, card_grid, hero, quick_actions, record_activity
 
 
 def render() -> None:
@@ -28,7 +28,32 @@ def render() -> None:
         ]
     )
 
-    requirement = st.text_area("业务需求", value="设计电商订单分析数仓", height=120)
+    selected = quick_actions(
+        "一键示例",
+        [
+            {
+                "tag": "电商订单主题",
+                "title": "订单履约分析",
+                "description": "覆盖下单、支付、退款、发货和签收链路。",
+                "button_label": "填入示例",
+                "requirement": "设计电商订单分析数仓，覆盖下单、支付、退款和履约分析",
+            },
+            {
+                "tag": "用户行为主题",
+                "title": "行为漏斗分析",
+                "description": "覆盖浏览、加购、收藏、下单和支付转化。",
+                "button_label": "填入示例",
+                "requirement": "围绕用户行为日志设计实时与离线结合的分析数仓",
+            },
+        ],
+        key_prefix="warehouse-design-demo",
+    )
+    if selected:
+        st.session_state["warehouse_design_requirement"] = selected.get("requirement", "")
+        record_activity("数仓设计", f"加载{selected.get('tag', '示例')}示例")
+
+    st.session_state.setdefault("warehouse_design_requirement", "设计电商订单分析数仓")
+    requirement = st.text_area("业务需求", key="warehouse_design_requirement", height=120)
     use_rag = st.checkbox("使用知识库上下文", value=True)
 
     if not st.button("生成数仓方案", type="primary"):
@@ -64,6 +89,7 @@ def render() -> None:
         with layer_tabs[6]:
             for recommendation in result.get("recommendations", []):
                 st.write(f"- {recommendation}")
+        record_activity("数仓设计", f"生成方案：{requirement[:28]}")
     except Exception as exc:
         st.error(f"数仓设计失败：{exc}")
 
