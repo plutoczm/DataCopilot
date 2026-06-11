@@ -109,12 +109,22 @@ def render() -> None:
 
 def main() -> None:
     pages = [
-        st.Page(render, title="首页", icon=":material/dashboard:"),
-        st.Page(chat.render, title="智能问答", icon=":material/forum:"),
-        st.Page(knowledge_base.render, title="知识库", icon=":material/library_books:"),
-        st.Page(text2sql.render, title="Text2SQL", icon=":material/code:"),
-        st.Page(sql_review.render, title="SQL 审查", icon=":material/rule:"),
-        st.Page(warehouse_design.render, title="数仓设计", icon=":material/schema:"),
+        st.Page(render, title="首页", icon=":material/dashboard:", url_path="home"),
+        st.Page(chat.render, title="智能问答", icon=":material/forum:", url_path="chat"),
+        st.Page(
+            knowledge_base.render,
+            title="知识库",
+            icon=":material/library_books:",
+            url_path="knowledge",
+        ),
+        st.Page(text2sql.render, title="Text2SQL", icon=":material/code:", url_path="text2sql"),
+        st.Page(sql_review.render, title="SQL 审查", icon=":material/rule:", url_path="sql-review"),
+        st.Page(
+            warehouse_design.render,
+            title="数仓设计",
+            icon=":material/schema:",
+            url_path="warehouse-design",
+        ),
     ]
     navigation = st.navigation(pages)
     navigation.run()

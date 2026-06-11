@@ -231,6 +231,22 @@ def test_frontend_uses_chinese_navigation_and_theme() -> None:
     assert "最近操作" in app_content
 
 
+def test_streamlit_pages_define_unique_url_paths() -> None:
+    app_content = Path("frontend/app.py").read_text(encoding="utf-8")
+    expected_paths = [
+        'url_path="home"',
+        'url_path="chat"',
+        'url_path="knowledge"',
+        'url_path="text2sql"',
+        'url_path="sql-review"',
+        'url_path="warehouse-design"',
+    ]
+
+    for path in expected_paths:
+        assert path in app_content
+    assert app_content.count("url_path=") == len(expected_paths)
+
+
 def test_frontend_pages_use_chinese_display_text() -> None:
     expected_text = {
         "frontend/app.py": ["数据工程 AI 工作台", "系统状态", "工作区"],
