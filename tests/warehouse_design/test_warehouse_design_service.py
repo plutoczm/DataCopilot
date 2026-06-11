@@ -72,6 +72,23 @@ class FakeLLMProvider:
         return "fake"
 
 
+class InvalidJSONLLMProvider(FakeLLMProvider):
+    async def chat(
+        self,
+        messages: Sequence[LLMMessage],
+        *,
+        temperature: float | None = None,
+        max_tokens: int | None = None,
+    ) -> LLMResponse:
+        self.messages = list(messages)
+        return LLMResponse(
+            provider="fake",
+            model="fake-warehouse",
+            content="{bad json",
+            usage=LLMUsage(prompt_tokens=10, completion_tokens=5, total_tokens=15),
+        )
+
+
 class FakeRAGService:
     def __init__(self) -> None:
         self.called = False
@@ -172,6 +189,19 @@ async def test_design_service_uses_rag_context_when_enabled() -> None:
     assert "Requirement docs mention" in result.metadata["rag_context"]
     prompt = "\n".join(message.content for message in llm.messages)
     assert "user province dimensions" in prompt
+
+
+async def test_design_service_falls_back_to_template_when_llm_returns_invalid_json() -> None:
+    service = WarehouseDesignService(llm_provider=InvalidJSONLLMProvider())
+
+    result = await service.design(requirement="设计电商订单分析数仓", use_rag=False)
+
+    assert result.ods
+    assert result.dwd
+    assert result.dws
+    assert result.ads
+    assert result.metadata["llm_payload_used"] is False
+    assert result.metadata["llm_parse_error"] == "LLM response must be valid JSON"
 
 
 async def test_design_service_generates_domain_specific_metrics() -> None:

@@ -60,6 +60,7 @@ class WarehouseDesignService:
             collection_name=rag_collection_name,
         )
         llm_payload: dict[str, Any] = {}
+        llm_parse_error: str | None = None
         token_usage = None
         if self.llm_provider is not None:
             response = await self.llm_provider.chat(
@@ -70,8 +71,11 @@ class WarehouseDesignService:
                 temperature=0.0,
                 max_tokens=3000,
             )
-            llm_payload = self._parse_llm_payload(response.content)
             token_usage = response.usage
+            try:
+                llm_payload = self._parse_llm_payload(response.content)
+            except WarehouseDesignGenerationError as exc:
+                llm_parse_error = str(exc)
 
         result = self._merge_with_template(requirement, llm_payload)
         if token_usage is not None:
@@ -83,6 +87,8 @@ class WarehouseDesignService:
                 "llm_payload_used": bool(llm_payload),
             }
         )
+        if llm_parse_error is not None:
+            result.metadata["llm_parse_error"] = llm_parse_error
         return result
 
     async def _retrieve_rag_context(
