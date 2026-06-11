@@ -1,0 +1,179 @@
+name: datacopilot
+
+x-common-logging: &common-logging
+  driver: json-file
+  options:
+    max-size: "50m"
+    max-file: "5"
+
+x-backend-env: &backend-env
+  DATACOPILOT_ENVIRONMENT: production
+  DATACOPILOT_DEBUG: "false"
+  DATACOPILOT_PATHS__PROJECT_ROOT: /app
+  DATACOPILOT_PATHS__DATA_DIR: data
+  DATACOPILOT_PATHS__CHROMADB_DIR: data/chromadb
+  DATACOPILOT_PATHS__UPLOADS_DIR: data/uploads
+  DATACOPILOT_PATHS__LOGS_DIR: data/logs
+  DATACOPILOT_PATHS__CACHE_DIR: data/cache
+  DATACOPILOT_PATHS__EMBEDDINGS_DIR: data/embeddings
+  DATACOPILOT_PATHS__TEMP_DIR: data/temp
+  DATACOPILOT_PATHS__MODELS_DIR: models
+  DATACOPILOT_LOGGING__FILE_PATH: data/logs/datacopilot.log
+  DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+  DEEPSEEK_BASE_URL: ${DEEPSEEK_BASE_URL:-https://api.deepseek.com/v1}
+  DEEPSEEK_MODEL: ${DEEPSEEK_MODEL:-deepseek-chat}
+  DEEPSEEK_TIMEOUT: ${DEEPSEEK_TIMEOUT:-60}
+  DEEPSEEK_MAX_RETRIES: ${DEEPSEEK_MAX_RETRIES:-2}
+
+services:
+  chromadb:
+    image: chromadb/chroma:0.5.23
+    container_name: datacopilot-chromadb
+    restart: unless-stopped
+    environment:
+      IS_PERSISTENT: "TRUE"
+      PERSIST_DIRECTORY: /chroma/chroma
+      ANONYMIZED_TELEMETRY: "FALSE"
+      CHROMA_SERVER_HOST: 0.0.0.0
+      CHROMA_SERVER_HTTP_PORT: "8000"
+    ports:
+      - "${CHROMADB_PORT:-8001}:8000"
+    volumes:
+      - type: bind
+        source: ./data/chromadb
+        target: /chroma/chroma
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/v1/heartbeat', timeout=5)"
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 4G
+    cpus: "2.0"
+    mem_limit: 4g
+    networks:
+      - datacopilot
+    logging: *common-logging
+
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+      args:
+        DATACOPILOT_UID: ${DATACOPILOT_UID:-1014}
+        DATACOPILOT_GID: ${DATACOPILOT_GID:-1015}
+    image: datacopilot-backend:${DATACOPILOT_IMAGE_TAG:-0.1.0}
+    container_name: datacopilot-backend
+    restart: unless-stopped
+    env_file:
+      - docker/.env.production
+    environment: *backend-env
+    depends_on:
+      chromadb:
+        condition: service_healthy
+    ports:
+      - "${BACKEND_PORT:-8000}:8000"
+    volumes:
+      - type: bind
+        source: ./data
+        target: /app/data
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - curl -fsS http://127.0.0.1:8000/health >/dev/null || exit 1
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    deploy:
+      resources:
+        limits:
+          cpus: "4.0"
+          memory: 8G
+    cpus: "4.0"
+    mem_limit: 8g
+    networks:
+      - datacopilot
+    logging: *common-logging
+
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+      args:
+        DATACOPILOT_UID: ${DATACOPILOT_UID:-1014}
+        DATACOPILOT_GID: ${DATACOPILOT_GID:-1015}
+    image: datacopilot-frontend:${DATACOPILOT_IMAGE_TAG:-0.1.0}
+    container_name: datacopilot-frontend
+    restart: unless-stopped
+    env_file:
+      - docker/.env.production
+    environment:
+      BACKEND_URL: http://backend:8000
+      STREAMLIT_SERVER_HEADLESS: "true"
+      STREAMLIT_BROWSER_GATHER_USAGE_STATS: "false"
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "${FRONTEND_PORT:-8501}:8501"
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - curl -fsS http://127.0.0.1:8501/_stcore/health >/dev/null || exit 1
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 45s
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 2G
+    cpus: "1.0"
+    mem_limit: 2g
+    networks:
+      - datacopilot
+    logging: *common-logging
+
+  ollama:
+    image: ollama/ollama:0.12.10
+    container_name: datacopilot-ollama
+    profiles:
+      - ollama
+    restart: unless-stopped
+    ports:
+      - "${OLLAMA_PORT:-11434}:11434"
+    volumes:
+      - type: bind
+        source: ./data/ollama
+        target: /root/.ollama
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - ollama list >/dev/null 2>&1 || exit 1
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          cpus: "4.0"
+          memory: 8G
+    cpus: "4.0"
+    mem_limit: 8g
+    networks:
+      - datacopilot
+    logging: *common-logging
+
+networks:
+  datacopilot:
+    name: datacopilot
+    driver: bridge
