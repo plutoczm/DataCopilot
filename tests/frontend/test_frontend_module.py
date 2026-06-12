@@ -250,6 +250,16 @@ def test_frontend_uses_chinese_navigation_and_theme() -> None:
     assert "最近操作" in app_content
 
 
+def test_hero_layout_keeps_text_visible() -> None:
+    theme_content = Path("frontend/components/theme.py").read_text(encoding="utf-8")
+
+    assert "overflow: visible;" in theme_content
+    assert "min-height: 8.5rem;" in theme_content
+    assert "box-sizing: border-box;" in theme_content
+    assert "position: relative;" in theme_content
+    assert "z-index: 1;" in theme_content
+
+
 def test_streamlit_pages_define_unique_url_paths() -> None:
     app_content = Path("frontend/app.py").read_text(encoding="utf-8")
     expected_paths = [

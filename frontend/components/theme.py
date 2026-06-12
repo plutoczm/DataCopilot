@@ -37,7 +37,7 @@ def apply_theme() -> None:
 
         .block-container {
           max-width: 1280px;
-          padding-top: 1.25rem;
+          padding-top: 3.25rem;
           padding-bottom: 3rem;
           animation: fadeUp 360ms ease-out both;
         }
@@ -92,14 +92,16 @@ def apply_theme() -> None:
 
         .datacopilot-hero {
           position: relative;
-          overflow: hidden;
+          overflow: visible;
+          box-sizing: border-box;
+          min-height: 8.5rem;
           border: 1px solid rgba(226, 232, 240, 0.9);
           border-radius: 8px;
           background:
             linear-gradient(135deg, rgba(37, 99, 235, 0.95), rgba(14, 165, 233, 0.86)),
             linear-gradient(180deg, #FFFFFF, #EFF6FF);
           color: #FFFFFF;
-          padding: 1.35rem 1.5rem;
+          padding: 1.7rem 1.6rem;
           box-shadow: 0 20px 48px rgba(37, 99, 235, 0.22);
           animation: fadeUp 360ms ease-out both;
         }
@@ -112,16 +114,21 @@ def apply_theme() -> None:
           height: 18rem;
           border-radius: 999px;
           background: rgba(255, 255, 255, 0.16);
+          z-index: 0;
         }
 
         .datacopilot-hero h1 {
+          position: relative;
+          z-index: 1;
           color: #FFFFFF;
-          font-size: 2rem;
-          line-height: 1.2;
+          font-size: 2.15rem;
+          line-height: 1.28;
           margin: 0 0 0.45rem 0;
         }
 
         .datacopilot-hero p {
+          position: relative;
+          z-index: 1;
           color: rgba(255, 255, 255, 0.9);
           margin: 0;
           max-width: 64rem;
