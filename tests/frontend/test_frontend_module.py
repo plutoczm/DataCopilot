@@ -253,7 +253,6 @@ def test_frontend_uses_chinese_navigation_and_theme() -> None:
 def test_streamlit_pages_define_unique_url_paths() -> None:
     app_content = Path("frontend/app.py").read_text(encoding="utf-8")
     expected_paths = [
-        'url_path="home"',
         'url_path="chat"',
         'url_path="knowledge"',
         'url_path="text2sql"',
@@ -263,6 +262,10 @@ def test_streamlit_pages_define_unique_url_paths() -> None:
 
     for path in expected_paths:
         assert path in app_content
+    assert 'default=True' in app_content
+    assert 'url_path="home"' not in app_content
+    assert '"pages/warehouse_design.py"' in app_content
+    assert "from frontend.pages import" not in app_content
     assert app_content.count("url_path=") == len(expected_paths)
 
 

@@ -22,7 +22,6 @@ from frontend.components.theme import (
     record_activity,
     status_badge,
 )
-from frontend.pages import chat, knowledge_base, sql_review, text2sql, warehouse_design
 
 
 def render() -> None:
@@ -109,18 +108,18 @@ def render() -> None:
 
 def main() -> None:
     pages = [
-        st.Page(render, title="首页", icon=":material/dashboard:", url_path="home"),
-        st.Page(chat.render, title="智能问答", icon=":material/forum:", url_path="chat"),
+        st.Page(render, title="首页", icon=":material/dashboard:", default=True),
+        st.Page("pages/chat.py", title="智能问答", icon=":material/forum:", url_path="chat"),
         st.Page(
-            knowledge_base.render,
+            "pages/knowledge_base.py",
             title="知识库",
             icon=":material/library_books:",
             url_path="knowledge",
         ),
-        st.Page(text2sql.render, title="Text2SQL", icon=":material/code:", url_path="text2sql"),
-        st.Page(sql_review.render, title="SQL 审查", icon=":material/rule:", url_path="sql-review"),
+        st.Page("pages/text2sql.py", title="Text2SQL", icon=":material/code:", url_path="text2sql"),
+        st.Page("pages/sql_review.py", title="SQL 审查", icon=":material/rule:", url_path="sql-review"),
         st.Page(
-            warehouse_design.render,
+            "pages/warehouse_design.py",
             title="数仓设计",
             icon=":material/schema:",
             url_path="warehouse-design",

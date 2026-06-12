@@ -70,6 +70,10 @@ def test_development_scripts_use_project_local_runtime_paths() -> None:
     assert "http://127.0.0.1:${BACKEND_PORT}" in dev_content
     assert "data/logs" in dev_content
     assert "data/temp" in dev_content
+    assert "trap handle_stop INT TERM" in dev_content
+    assert "trap cleanup EXIT" in dev_content
+    assert "wait_for_exit" in dev_content
+    assert "按 Ctrl+C 停止服务" in dev_content
     assert "frontend-dev.pid" in stop_content
     assert "backend-dev.pid" in stop_content
 

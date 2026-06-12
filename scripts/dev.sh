@@ -11,6 +11,9 @@ LOG_DIR="${PROJECT_ROOT}/data/logs"
 PID_DIR="${PROJECT_ROOT}/data/temp"
 BACKEND_PID_FILE="${PID_DIR}/backend-dev.pid"
 FRONTEND_PID_FILE="${PID_DIR}/frontend-dev.pid"
+BACKEND_PID=""
+FRONTEND_PID=""
+STOP_REQUESTED=0
 
 mkdir -p "${LOG_DIR}" "${PID_DIR}"
 
@@ -29,9 +32,43 @@ port_is_busy() {
   ss -ltn 2>/dev/null | awk '{print $4}' | grep -Eq "[:.]${port}$"
 }
 
+stop_pid() {
+  local name="$1"
+  local pid="$2"
+  if [[ -z "${pid}" ]] || ! kill -0 "${pid}" >/dev/null 2>&1; then
+    return
+  fi
+
+  kill "${pid}" >/dev/null 2>&1 || true
+  for _ in {1..20}; do
+    if ! kill -0 "${pid}" >/dev/null 2>&1; then
+      break
+    fi
+    sleep 0.2
+  done
+  if kill -0 "${pid}" >/dev/null 2>&1; then
+    kill -9 "${pid}" >/dev/null 2>&1 || true
+  fi
+  echo "Stopped ${name} pid ${pid}."
+}
+
+cleanup() {
+  stop_pid "frontend" "${FRONTEND_PID}"
+  stop_pid "backend" "${BACKEND_PID}"
+  rm -f "${FRONTEND_PID_FILE}" "${BACKEND_PID_FILE}"
+}
+
+handle_stop() {
+  STOP_REQUESTED=1
+  echo
+  echo "Stopping DataPilot-AI dev services..."
+  cleanup
+}
+
 start_backend() {
   if is_running "${BACKEND_PID_FILE}"; then
-    echo "Backend already running on pid $(cat "${BACKEND_PID_FILE}")"
+    BACKEND_PID="$(cat "${BACKEND_PID_FILE}")"
+    echo "Backend already running on pid ${BACKEND_PID}"
     return
   fi
   if port_is_busy "${BACKEND_PORT}"; then
@@ -44,12 +81,14 @@ start_backend() {
       --host "${BACKEND_HOST}" \
       --port "${BACKEND_PORT}"
   ) >"${LOG_DIR}/backend-dev.log" 2>&1 &
-  echo "$!" >"${BACKEND_PID_FILE}"
+  BACKEND_PID="$!"
+  echo "${BACKEND_PID}" >"${BACKEND_PID_FILE}"
 }
 
 start_frontend() {
   if is_running "${FRONTEND_PID_FILE}"; then
-    echo "Frontend already running on pid $(cat "${FRONTEND_PID_FILE}")"
+    FRONTEND_PID="$(cat "${FRONTEND_PID_FILE}")"
+    echo "Frontend already running on pid ${FRONTEND_PID}"
     return
   fi
   if port_is_busy "${FRONTEND_PORT}"; then
@@ -65,8 +104,26 @@ start_frontend() {
       --server.headless true \
       --browser.gatherUsageStats false
   ) >"${LOG_DIR}/frontend-dev.log" 2>&1 &
-  echo "$!" >"${FRONTEND_PID_FILE}"
+  FRONTEND_PID="$!"
+  echo "${FRONTEND_PID}" >"${FRONTEND_PID_FILE}"
 }
+
+wait_for_exit() {
+  while [[ "${STOP_REQUESTED}" -eq 0 ]]; do
+    if [[ -n "${BACKEND_PID}" ]] && ! kill -0 "${BACKEND_PID}" >/dev/null 2>&1; then
+      echo "Backend exited. See ${LOG_DIR}/backend-dev.log" >&2
+      return 1
+    fi
+    if [[ -n "${FRONTEND_PID}" ]] && ! kill -0 "${FRONTEND_PID}" >/dev/null 2>&1; then
+      echo "Frontend exited. See ${LOG_DIR}/frontend-dev.log" >&2
+      return 1
+    fi
+    sleep 1
+  done
+}
+
+trap handle_stop INT TERM
+trap cleanup EXIT
 
 start_backend
 start_frontend
@@ -75,3 +132,6 @@ echo "DataPilot-AI dev services started."
 echo "Backend:  http://127.0.0.1:${BACKEND_PORT}"
 echo "Frontend: http://127.0.0.1:${FRONTEND_PORT}"
 echo "Logs:     ${LOG_DIR}/backend-dev.log and ${LOG_DIR}/frontend-dev.log"
+echo "按 Ctrl+C 停止服务。"
+
+wait_for_exit
