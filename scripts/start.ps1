@@ -7,96 +7,157 @@ param(
 
 $ErrorActionPreference = "Stop"
 $ProjectRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
-$VenvDir = Join-Path $ProjectRoot ".venv"
-$VenvPython = Join-Path $VenvDir "Scripts\python.exe"
+$CondaEnvDir = Join-Path $ProjectRoot ".conda"
+$CondaPython = Join-Path $CondaEnvDir "python.exe"
 $DataTemp = Join-Path $ProjectRoot "data\temp"
 $LogDir = Join-Path $ProjectRoot "data\logs"
 $BackendPidFile = Join-Path $DataTemp "backend-dev.pid"
 $FrontendPidFile = Join-Path $DataTemp "frontend-dev.pid"
-$InstallMarker = Join-Path $VenvDir ".datacopilot-deps"
+$InstallMarker = Join-Path $CondaEnvDir ".datacopilot-deps"
 
-function Find-Python {
-    foreach ($candidate in @("py", "python3", "python")) {
-        $command = Get-Command $candidate -ErrorAction SilentlyContinue
-        if (-not $command) { continue }
-        try {
-            $version = & $candidate --version 2>&1
-            if ($LASTEXITCODE -eq 0 -and $version -match "Python") { return $candidate }
-        } catch { }
+function Find-Conda {
+    $candidates = @(
+        $env:CONDA_EXE,
+        "D:\Anaconda\Miniconda3\Scripts\conda.exe",
+        "D:\Anaconda\Anaconda3\Scripts\conda.exe",
+        (Join-Path $env:USERPROFILE "miniconda3\Scripts\conda.exe"),
+        (Join-Path $env:USERPROFILE "anaconda3\Scripts\conda.exe")
+    )
+    $command = Get-Command conda -ErrorAction SilentlyContinue
+    if ($command) { $candidates += $command.Source }
+    foreach ($candidate in ($candidates | Where-Object { $_ } | Select-Object -Unique)) {
+        if (Test-Path -LiteralPath $candidate) { return $candidate }
     }
-    throw "No usable Python found. Install Python 3.12+ and run this script again."
+    throw "Conda not found. Expected: D:\Anaconda\Miniconda3\Scripts\conda.exe"
 }
 
 function Start-ServiceProcess {
     param(
         [string]$Name,
-        [string]$Arguments,
-        [string]$LogPath,
+        [string[]]$Arguments,
         [hashtable]$Environment = @{}
     )
+
     $pidFile = if ($Name -eq "backend") { $BackendPidFile } else { $FrontendPidFile }
     if (Test-Path $pidFile) {
-        $existingPid = [int](Get-Content $pidFile -Raw).Trim()
-        if (Get-Process -Id $existingPid -ErrorAction SilentlyContinue) {
-            Write-Host "$Name is already running. PID=$existingPid"
-            return $existingPid
+        $existingProcessId = [int](Get-Content $pidFile -Raw).Trim()
+        if (Get-Process -Id $existingProcessId -ErrorAction SilentlyContinue) {
+            Write-Host "$Name is already running. PID=$existingProcessId"
+            return $existingProcessId
         }
         Remove-Item -LiteralPath $pidFile -Force -ErrorAction SilentlyContinue
     }
 
-    $startInfo = [System.Diagnostics.ProcessStartInfo]::new()
-    $startInfo.FileName = $VenvPython
-    $startInfo.Arguments = $Arguments
-    $startInfo.WorkingDirectory = $ProjectRoot
-    $startInfo.UseShellExecute = $false
-    $startInfo.CreateNoWindow = $true
-    $startInfo.RedirectStandardOutput = $true
-    $startInfo.RedirectStandardError = $true
-    foreach ($entry in $Environment.GetEnumerator()) { $startInfo.Environment[$entry.Key] = [string]$entry.Value }
+    $savedEnvironment = @{}
+    foreach ($entry in $Environment.GetEnumerator()) {
+        $savedEnvironment[$entry.Key] = [Environment]::GetEnvironmentVariable($entry.Key, "Process")
+        [Environment]::SetEnvironmentVariable($entry.Key, [string]$entry.Value, "Process")
+    }
+    try {
+        $startParameters = @{
+            FilePath = $CondaPython
+            ArgumentList = $Arguments
+            WorkingDirectory = $ProjectRoot
+            WindowStyle = "Hidden"
+            RedirectStandardOutput = (Join-Path $LogDir "$Name-dev.stdout.log")
+            RedirectStandardError = (Join-Path $LogDir "$Name-dev.stderr.log")
+            PassThru = $true
+        }
+        $process = Start-Process @startParameters
+    } finally {
+        foreach ($entry in $savedEnvironment.GetEnumerator()) {
+            [Environment]::SetEnvironmentVariable($entry.Key, $entry.Value, "Process")
+        }
+    }
 
-    $process = [System.Diagnostics.Process]::new()
-    $process.StartInfo = $startInfo
-    $process.Start() | Out-Null
-    $process.add_OutputDataReceived({ param($sender, $event) if ($null -ne $event.Data) { Add-Content -LiteralPath $LogPath -Value $event.Data } })
-    $process.add_ErrorDataReceived({ param($sender, $event) if ($null -ne $event.Data) { Add-Content -LiteralPath $LogPath -Value $event.Data } })
-    $process.BeginOutputReadLine()
-    $process.BeginErrorReadLine()
     Set-Content -LiteralPath $pidFile -Value $process.Id -Encoding ascii
     Write-Host "$Name started. PID=$($process.Id)"
     return $process.Id
 }
 
 New-Item -ItemType Directory -Force -Path $DataTemp, $LogDir | Out-Null
-foreach ($directory in @("data\cache", "data\uploads", "data\chromadb", "data\embeddings")) {
+foreach ($directory in @(
+    "data\cache\conda\pkgs",
+    "data\cache\pip",
+    "data\uploads",
+    "data\chromadb",
+    "data\embeddings"
+)) {
     New-Item -ItemType Directory -Force -Path (Join-Path $ProjectRoot $directory) | Out-Null
 }
 
-$pythonCommand = Find-Python
-if (-not (Test-Path $VenvPython)) {
-    Write-Host "Creating Windows virtual environment..."
-    & $pythonCommand -m venv $VenvDir
-}
-if (-not (Test-Path $VenvPython)) { throw "Failed to create virtual environment: $VenvPython" }
+$env:CONDA_PKGS_DIRS = Join-Path $ProjectRoot "data\cache\conda\pkgs"
+$env:PIP_CACHE_DIR = Join-Path $ProjectRoot "data\cache\pip"
+$env:TEMP = $DataTemp
+$env:TMP = $DataTemp
 
-if (-not $SkipInstall -and -not (Test-Path $InstallMarker)) {
-    Write-Host "Installing project dependencies (the first run may take a few minutes)..."
-    & $VenvPython -m pip install --upgrade pip
-    & $VenvPython -m pip install -r (Join-Path $ProjectRoot "backend\requirements.txt") -r (Join-Path $ProjectRoot "frontend\requirements.txt") -r (Join-Path $ProjectRoot "requirements-dev.txt")
+$CondaExe = Find-Conda
+if (-not (Test-Path $CondaPython)) {
+    Write-Host "Creating Conda environment in $CondaEnvDir with Python 3.11..."
+    & $CondaExe create --prefix $CondaEnvDir python=3.11 pip -y
+    if ($LASTEXITCODE -ne 0) { throw "Conda environment creation failed." }
+}
+if (-not (Test-Path $CondaPython)) { throw "Conda Python not found: $CondaPython" }
+
+$needsInstall = -not (Test-Path $InstallMarker)
+if (-not $needsInstall) {
+    & $CondaPython -c "import chromadb, fastapi, streamlit, uvicorn" 2>$null
+    $needsInstall = $LASTEXITCODE -ne 0
+}
+
+if ($needsInstall -and $SkipInstall) {
+    throw "Dependencies are missing. Run start.bat without -SkipInstall."
+}
+
+if ($needsInstall) {
+    Write-Host "Installing project dependencies (first run may take a few minutes)..."
+    & $CondaPython -m pip install --upgrade pip
+    if ($LASTEXITCODE -ne 0) { throw "pip upgrade failed." }
+    $pipArguments = @(
+        "-m", "pip", "install",
+        "-r", (Join-Path $ProjectRoot "backend\requirements.txt"),
+        "-r", (Join-Path $ProjectRoot "frontend\requirements.txt"),
+        "-r", (Join-Path $ProjectRoot "requirements-dev.txt")
+    )
+    & $CondaPython @pipArguments
+    if ($LASTEXITCODE -ne 0) { throw "Dependency installation failed." }
+    & $CondaPython -c "import chromadb, fastapi, streamlit, uvicorn"
+    if ($LASTEXITCODE -ne 0) { throw "Dependency verification failed." }
     Set-Content -LiteralPath $InstallMarker -Value (Get-Date).ToString("o") -Encoding ascii
 }
+
 if (-not (Test-Path (Join-Path $ProjectRoot ".env"))) {
     Copy-Item -LiteralPath (Join-Path $ProjectRoot ".env.example") -Destination (Join-Path $ProjectRoot ".env")
     Write-Host "Created .env from .env.example. Fill DEEPSEEK_API_KEY for AI features."
 }
 
-$backendLog = Join-Path $LogDir "backend-dev.log"
-$frontendLog = Join-Path $LogDir "frontend-dev.log"
-$backendPid = Start-ServiceProcess -Name "backend" -Arguments "-m uvicorn backend.app.main:app --host 0.0.0.0 --port $BackendPort" -LogPath $backendLog
-$frontendPid = Start-ServiceProcess -Name "frontend" -Arguments "-m streamlit run frontend/app.py --server.address 0.0.0.0 --server.port $FrontendPort --server.headless true --browser.gatherUsageStats false" -LogPath $frontendLog -Environment @{ BACKEND_URL = "http://127.0.0.1:$BackendPort" }
+$backendPid = Start-ServiceProcess -Name "backend" -Arguments @(
+    "-m", "uvicorn", "backend.app.main:app", "--host", "0.0.0.0", "--port", "$BackendPort"
+)
+$frontendPid = Start-ServiceProcess -Name "frontend" -Arguments @(
+    "-m", "streamlit", "run", "frontend/app.py",
+    "--server.address", "0.0.0.0",
+    "--server.port", "$FrontendPort",
+    "--server.headless", "true",
+    "--browser.gatherUsageStats", "false"
+) -Environment @{ BACKEND_URL = "http://127.0.0.1:$BackendPort" }
+
+Start-Sleep -Seconds 2
+if (-not (Get-Process -Id $backendPid -ErrorAction SilentlyContinue)) {
+    Stop-Process -Id $frontendPid -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $BackendPidFile, $FrontendPidFile -Force -ErrorAction SilentlyContinue
+    throw "Backend exited. Check data\logs\backend-dev.stderr.log"
+}
+if (-not (Get-Process -Id $frontendPid -ErrorAction SilentlyContinue)) {
+    Stop-Process -Id $backendPid -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $BackendPidFile, $FrontendPidFile -Force -ErrorAction SilentlyContinue
+    throw "Frontend exited. Check data\logs\frontend-dev.stderr.log"
+}
 
 Write-Host ""
-Write-Host "DataPilot-AI started:"
+Write-Host "DataPilot-AI started with Conda:"
 Write-Host "  Web UI:  http://127.0.0.1:$FrontendPort"
 Write-Host "  API:     http://127.0.0.1:$BackendPort/docs"
+Write-Host "  Conda:   $CondaEnvDir"
 Write-Host "  Logs:    $LogDir"
-Write-Host "Stop:     .\scripts\stop.ps1"
+Write-Host "Stop:     .\stop.bat"

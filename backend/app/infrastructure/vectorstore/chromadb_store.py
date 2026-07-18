@@ -1,7 +1,7 @@
 import json
 from collections.abc import Iterable, Sequence
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, TypeVar, cast
 
 import chromadb
 from chromadb.config import Settings as ChromaSettings
@@ -21,6 +21,7 @@ from backend.app.infrastructure.vectorstore.exceptions import (
 
 MetadataValue = str | int | float | bool
 Metadata = dict[str, MetadataValue]
+T = TypeVar("T")
 
 
 class ChromaDBVectorStore:
@@ -421,7 +422,7 @@ class ChromaDBVectorStore:
         return search_results
 
 
-def _batched[T](items: Sequence[T], batch_size: int) -> Iterable[Sequence[T]]:
+def _batched(items: Sequence[T], batch_size: int) -> Iterable[Sequence[T]]:
     if batch_size < 1:
         raise VectorStoreError("batch_size must be greater than zero")
     for start in range(0, len(items), batch_size):

@@ -6,11 +6,11 @@ foreach ($entry in @(@("frontend", "frontend-dev.pid"), @("backend", "backend-de
     $name = $entry[0]
     $pidFile = Join-Path $PidDir $entry[1]
     if (-not (Test-Path $pidFile)) { Write-Host "$name is not running."; continue }
-    $pid = [int](Get-Content $pidFile -Raw).Trim()
-    $process = Get-Process -Id $pid -ErrorAction SilentlyContinue
+    $processId = [int](Get-Content $pidFile -Raw).Trim()
+    $process = Get-Process -Id $processId -ErrorAction SilentlyContinue
     if ($process) {
-        Stop-Process -Id $pid -Force
-        Write-Host "Stopped $name. PID=$pid"
-    } else { Write-Host "$name PID=$pid has already exited." }
+        Stop-Process -Id $processId -Force
+        Write-Host "Stopped $name. PID=$processId"
+    } else { Write-Host "$name PID=$processId has already exited." }
     Remove-Item -LiteralPath $pidFile -Force -ErrorAction SilentlyContinue
 }

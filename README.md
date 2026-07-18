@@ -65,13 +65,13 @@ Place screenshots in `docs/assets/` before publishing:
 .\start.bat
 ```
 
-也可以直接双击 `start.bat`。脚本会自动创建 Windows 虚拟环境、安装后端/前端/测试依赖、复制 `.env.example` 为 `.env`，并同时启动 FastAPI 与 Streamlit。停止服务：
+也可以直接双击 `start.bat`。脚本会使用 `D:\Anaconda\Miniconda3`，在项目根目录创建 `.conda`（Python 3.11），安装后端/前端/测试依赖、复制 `.env.example` 为 `.env`，并同时启动 FastAPI 与 Streamlit。停止服务：
 
 ```text
 .\stop.bat
 ```
 
-如果系统允许执行 PowerShell 脚本，也可以使用 `.\start.ps1` 和 `.\stop.ps1`。
+如果系统允许执行 PowerShell 脚本，也可以使用 `.\start.ps1` 和 `.\stop.ps1`。Conda 环境、pip/conda 缓存和运行数据都保存在项目根目录，不依赖系统 Python。
 
 首次启动后，请在 `.env` 中填写 `DEEPSEEK_API_KEY`，否则页面仍可打开，但需要模型的功能会返回降级状态。
 
