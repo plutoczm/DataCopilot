@@ -1,0 +1,12 @@
+# Vercel installs this file for the root FastAPI entrypoint. Keep this list
+# flat because Vercel's dependency parser does not follow nested -r files.
+chromadb>=0.5,<1
+fastapi>=0.136,<1
+httpx>=0.28,<1
+langgraph>=0.6,<1
+pydantic>=2.12,<3
+pydantic-settings>=2.12,<3
+pypdf>=6.4,<7
+python-multipart>=0.0.20,<1
+python-docx>=1.2,<2
+uvicorn[standard]>=0.49,<1

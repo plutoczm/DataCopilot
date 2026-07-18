@@ -11,6 +11,8 @@ Use this checklist before publishing DataPilot-AI to GitHub or presenting it in 
 - [ ] No secrets are committed.
 - [ ] `.env` is not committed.
 - [ ] Runtime data directories contain only `.gitkeep` files.
+- [ ] `vercel.json`, root `index.py`, and `public/index.html` are present.
+- [ ] Windows one-click startup (`start.ps1` / `start.bat`) works.
 
 ## Docker Compose
 
@@ -20,6 +22,14 @@ Use this checklist before publishing DataPilot-AI to GitHub or presenting it in 
 - [ ] No anonymous volumes are created.
 - [ ] Data persists under `./data`.
 - [ ] Resource limits match backend 4 CPU/8G, frontend 1 CPU/2G, ChromaDB 2 CPU/4G.
+
+## Vercel
+
+- [ ] `vercel.cmd deploy --prod` succeeds.
+- [ ] `/` opens the public web console from a second network.
+- [ ] `/health`, `/docs`, and `/openapi.json` return successfully.
+- [ ] `DEEPSEEK_API_KEY` is configured as a Vercel production environment variable, never committed.
+- [ ] Persistent ChromaDB is externalized before production use.
 
 ## Backend
 

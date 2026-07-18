@@ -21,3 +21,5 @@ models/*
 
 .env
 !.env.example
+
+.vercel

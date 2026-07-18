@@ -2,6 +2,25 @@
 
 This guide deploys DataPilot-AI on Ubuntu 20.04 with Docker Compose.
 
+## Vercel（公网 API + 轻量 Web 控制台）
+
+Vercel 适合运行本项目的 FastAPI API 和 `public/index.html` 控制台。完整 Streamlit 多页面界面仍建议使用下方 Docker Compose 部署，因为 Streamlit 需要长驻进程和 WebSocket。
+
+项目根目录已经包含 `index.py`、`vercel.json`、`requirements.txt` 和 `public/index.html`，可以直接部署：
+
+```bash
+npm i -g vercel
+vercel login
+vercel link
+vercel env add DEEPSEEK_API_KEY production
+vercel env add DEEPSEEK_BASE_URL production
+vercel deploy --prod
+```
+
+部署完成后，打开 Vercel 输出的域名即可从其他网络访问控制台；API 文档在 `/docs`，健康检查在 `/health`。
+
+本机和 Docker 的数据固定保存在项目根目录 `data/`。只有 Vercel 云函数因为部署包只读，代码才会把云端临时数据写入 `/tmp/datacopilot-data`；这不是你电脑的 C 盘路径，也不会改变本地目录。生产环境请把 ChromaDB、上传文件和日志迁移到外部持久化服务，并在 Vercel 项目环境变量中配置对应连接信息。
+
 ## Requirements
 
 - Ubuntu 20.04

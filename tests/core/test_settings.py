@@ -121,6 +121,12 @@ def test_production_environment_disallows_debug() -> None:
     assert settings.debug is False
 
 
+def test_debug_environment_strings_are_parsed_as_booleans() -> None:
+    assert Settings(_env_file=None, debug="false").debug is False
+    assert Settings(_env_file=None, debug="0").debug is False
+    assert Settings(_env_file=None, debug="true").debug is True
+
+
 def test_config_helpers_cache_and_clear_settings(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("DATACOPILOT_ENVIRONMENT", "test")
     clear_settings_cache()

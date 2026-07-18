@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content="DataPilot-AI 数据工程智能工作台" />
+    <title>DataPilot-AI · 数据工程智能工作台</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #07111f;
+        --panel: rgba(15, 29, 49, 0.86);
+        --panel-2: #102540;
+        --border: #27415f;
+        --text: #ecf5ff;
+        --muted: #9cb5d0;
+        --accent: #45d6b0;
+        --accent-2: #5ba7ff;
+        --danger: #ff8e8e;
+        font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+          "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        color: var(--text);
+        background:
+          radial-gradient(circle at 8% 0%, #17395b 0, transparent 34rem),
+          radial-gradient(circle at 100% 10%, #183d3f 0, transparent 32rem),
+          var(--bg);
+      }
+      .shell { width: min(1180px, calc(100% - 32px)); margin: 0 auto; padding: 28px 0 56px; }
+      header { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; margin-bottom: 24px; }
+      .eyebrow { color: var(--accent); font-size: 12px; letter-spacing: .18em; text-transform: uppercase; }
+      h1 { font-size: clamp(28px, 5vw, 50px); line-height: 1.04; margin: 8px 0 12px; }
+      h2 { font-size: 20px; margin: 0 0 14px; }
+      p { color: var(--muted); line-height: 1.65; margin: 0; }
+      .badge { border: 1px solid var(--border); background: rgba(16, 37, 64, .8); border-radius: 999px; padding: 9px 14px; color: var(--muted); white-space: nowrap; }
+      .badge.ok { color: var(--accent); border-color: rgba(69, 214, 176, .45); }
+      .badge.warn { color: #ffd17d; border-color: rgba(255, 209, 125, .45); }
+      .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+      .card { background: var(--panel); border: 1px solid var(--border); border-radius: 18px; padding: 20px; box-shadow: 0 18px 50px rgba(0,0,0,.2); backdrop-filter: blur(14px); }
+      .card.wide { grid-column: 1 / -1; }
+      .muted { color: var(--muted); font-size: 13px; }
+      label { display: block; color: var(--muted); font-size: 13px; margin: 12px 0 6px; }
+      input, select, textarea {
+        width: 100%; border: 1px solid var(--border); border-radius: 10px; color: var(--text);
+        background: #0a1a2e; padding: 11px 12px; font: inherit; outline: none;
+      }
+      textarea { min-height: 112px; resize: vertical; }
+      input:focus, select:focus, textarea:focus { border-color: var(--accent-2); box-shadow: 0 0 0 3px rgba(91,167,255,.14); }
+      button { border: 0; border-radius: 10px; padding: 10px 15px; color: #04121d; background: var(--accent); font-weight: 700; cursor: pointer; margin-top: 12px; }
+      button.secondary { color: var(--text); background: var(--panel-2); border: 1px solid var(--border); }
+      button:disabled { opacity: .6; cursor: wait; }
+      pre { white-space: pre-wrap; word-break: break-word; background: #06101e; border: 1px solid #1d3653; border-radius: 10px; padding: 13px; min-height: 70px; max-height: 420px; overflow: auto; color: #d7e9ff; }
+      .health { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin-top: 16px; }
+      .metric { border: 1px solid var(--border); border-radius: 12px; padding: 11px; background: rgba(7,17,31,.5); }
+      .metric strong { display: block; margin-top: 5px; }
+      footer { margin-top: 22px; color: var(--muted); font-size: 13px; }
+      a { color: var(--accent-2); }
+      @media (max-width: 760px) { header { display: block; } .badge { display: inline-block; margin-top: 12px; } .grid { grid-template-columns: 1fr; } .card.wide { grid-column: auto; } .health { grid-template-columns: 1fr; } }
+    </style>
+  </head>
+  <body>
+    <main class="shell">
+      <header>
+        <div>
+          <div class="eyebrow">Data Engineering Copilot</div>
+          <h1>数据工程智能工作台</h1>
+          <p>知识库问答、Text2SQL、SQL 审查与数仓设计集中在一个可公开访问的工作台中。</p>
+        </div>
+        <div id="status" class="badge">正在连接后端…</div>
+      </header>
+
+      <section class="card wide">
+        <h2>服务状态</h2>
+        <p class="muted">此控制台与 FastAPI 使用同一域名部署；DeepSeek 密钥只需要配置在 Vercel，不会暴露给浏览器。</p>
+        <div class="health">
+          <div class="metric"><span class="muted">服务</span><strong id="service">-</strong></div>
+          <div class="metric"><span class="muted">环境</span><strong id="environment">-</strong></div>
+          <div class="metric"><span class="muted">知识库文档</span><strong id="documents">-</strong></div>
+        </div>
+        <button class="secondary" id="refresh-health" type="button">刷新状态</button>
+      </section>
+
+      <section class="grid" style="margin-top:16px">
+        <form class="card" id="agent-form">
+          <h2>智能问答 / Agent</h2>
+          <p class="muted">自动判断知识库、Text2SQL、SQL 审查或数仓设计意图。</p>
+          <label for="agent-message">问题</label>
+          <textarea id="agent-message" required>什么是 Spark AQE？它能解决哪些查询性能问题？</textarea>
+          <button type="submit">发送问题</button>
+          <pre id="agent-result">等待输入…</pre>
+        </form>
+
+        <form class="card" id="sql-form">
+          <h2>Text2SQL</h2>
+          <p class="muted">将自然语言转换为可审阅的 SQL。</p>
+          <label for="sql-question">业务问题</label>
+          <textarea id="sql-question" required>统计最近 7 天活跃用户数，并按省份输出 Top 10</textarea>
+          <label for="sql-engine">SQL 引擎</label>
+          <select id="sql-engine"><option>hive</option><option>spark</option><option>mysql</option><option>clickhouse</option></select>
+          <label for="sql-schema">表结构</label>
+          <textarea id="sql-schema">dwd_user_behavior_detail(user_id bigint, event_time timestamp, province string, event_name string, dt string)</textarea>
+          <button type="submit">生成 SQL</button>
+          <pre id="sql-result">等待输入…</pre>
+        </form>
+
+        <form class="card" id="review-form">
+          <h2>SQL 审查</h2>
+          <p class="muted">识别风险、性能问题并给出优化建议。</p>
+          <label for="review-engine">SQL 引擎</label>
+          <select id="review-engine"><option>hive</option><option>spark</option><option>mysql</option><option>clickhouse</option></select>
+          <label for="review-sql">SQL</label>
+          <textarea id="review-sql" required>SELECT * FROM dwd_user_behavior_detail WHERE dt >= '2026-07-01';</textarea>
+          <button type="submit">开始审查</button>
+          <pre id="review-result">等待输入…</pre>
+        </form>
+
+        <form class="card" id="warehouse-form">
+          <h2>数仓设计</h2>
+          <p class="muted">生成 ODS / DWD / DWS / ADS 分层、指标与 DDL 建议。</p>
+          <label for="warehouse-requirement">需求</label>
+          <textarea id="warehouse-requirement" required>设计电商订单分析数仓，覆盖下单、支付、退款和履约分析。</textarea>
+          <button type="submit">生成设计</button>
+          <pre id="warehouse-result">等待输入…</pre>
+        </form>
+      </section>
+
+      <footer>
+        API 文档：<a href="/docs">/docs</a> · OpenAPI：<a href="/openapi.json">/openapi.json</a> · 本页面为 Vercel 轻量控制台，完整 Streamlit 界面仍可通过 Docker 启动。
+      </footer>
+    </main>
+    <script>
+      const apiBase = new URLSearchParams(location.search).get("api") || "";
+      const $ = (id) => document.getElementById(id);
+      const show = (id, value) => $(id).textContent = typeof value === "string" ? value : JSON.stringify(value, null, 2);
+      async function request(path, options = {}) {
+        const response = await fetch(`${apiBase}${path}`, { headers: { "Content-Type": "application/json", ...(options.headers || {}) }, ...options });
+        const text = await response.text();
+        let payload; try { payload = text ? JSON.parse(text) : {}; } catch { payload = text; }
+        if (!response.ok) throw new Error(typeof payload === "string" ? payload : (payload?.detail || payload?.error?.message || `HTTP ${response.status}`));
+        return payload;
+      }
+      async function refreshHealth() {
+        const badge = $("status"); badge.className = "badge"; badge.textContent = "正在连接后端…";
+        try {
+          const payload = await request("/health");
+          show("service", payload.service || "-"); show("environment", payload.environment || "-");
+          show("documents", payload.vector_store?.document_count ?? 0);
+          badge.className = `badge ${payload.status === "ok" ? "ok" : "warn"}`;
+          badge.textContent = payload.status === "ok" ? "后端运行正常" : `后端状态：${payload.status || "degraded"}`;
+        } catch (error) { badge.className = "badge warn"; badge.textContent = `连接失败：${error.message}`; }
+      }
+      function bind(formId, resultId, path, makeBody) {
+        $(formId).addEventListener("submit", async (event) => {
+          event.preventDefault(); const button = event.currentTarget.querySelector("button[type=submit]");
+          button.disabled = true; show(resultId, "处理中…");
+          try { show(resultId, await request(path, { method: "POST", body: JSON.stringify(makeBody()) })); }
+          catch (error) { show(resultId, `请求失败：${error.message}`); }
+          finally { button.disabled = false; }
+        });
+      }
+      bind("agent-form", "agent-result", "/api/v1/agent/chat", () => ({ message: $("agent-message").value, engine: "hive", collection_name: "knowledge_base", top_k: 5, use_rag: true }));
+      bind("sql-form", "sql-result", "/api/v1/text2sql", () => ({ question: $("sql-question").value, engine: $("sql-engine").value, schema_context: $("sql-schema").value, use_rag: false }));
+      bind("review-form", "review-result", "/api/v1/sql-review", () => ({ sql: $("review-sql").value, engine: $("review-engine").value, include_llm_explanation: true }));
+      bind("warehouse-form", "warehouse-result", "/api/v1/warehouse-design", () => ({ requirement: $("warehouse-requirement").value, use_rag: false }));
+      $("refresh-health").addEventListener("click", refreshHealth); refreshHealth();
+    </script>
+  </body>
+</html>

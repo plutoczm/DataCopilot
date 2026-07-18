@@ -259,6 +259,12 @@ class Settings(BaseSettings):
     @classmethod
     def default_debug_by_environment(cls, value: Any, info: ValidationInfo) -> bool:
         if value is not None:
+            if isinstance(value, str):
+                normalized = value.strip().lower()
+                if normalized in {"1", "true", "t", "yes", "y", "on"}:
+                    return True
+                if normalized in {"0", "false", "f", "no", "n", "off", ""}:
+                    return False
             return bool(value)
         environment = info.data.get("environment", Environment.DEVELOPMENT)
         return environment is not Environment.PRODUCTION

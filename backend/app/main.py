@@ -5,6 +5,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from fastapi.middleware.cors import CORSMiddleware
 
 from backend.app.application.agent.exceptions import AgentError
 from backend.app.core.constants import APP_VERSION
@@ -53,6 +54,13 @@ def create_app() -> FastAPI:
             {"name": "Warehouse Design", "description": "Layered data warehouse design generation APIs."},
             {"name": "Agent", "description": "Unified LangGraph agent routing APIs."},
         ],
+    )
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=list(settings.app.cors_origins),
+        allow_credentials=False,
+        allow_methods=["*"],
+        allow_headers=["*"],
     )
     logger = setup_fastapi_logging(app, settings)
 

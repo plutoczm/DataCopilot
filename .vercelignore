@@ -1,0 +1,16 @@
+.git
+.github
+.venv
+.pytest_cache
+__pycache__
+*.pyc
+tests
+docs
+frontend
+data
+models
+scripts
+RELEASE_CHECKLIST.md
+CONTRIBUTING.md
+README.md
+.env
