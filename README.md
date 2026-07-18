@@ -59,17 +59,19 @@ Place screenshots in `docs/assets/` before publishing:
 
 ### Windows 一键启动
 
-在项目根目录执行：
+在项目根目录执行（不受 PowerShell 执行策略限制）：
 
-```powershell
-.\start.ps1
+```text
+.\start.bat
 ```
 
-也可以双击 `start.bat`。脚本会自动创建 Windows 虚拟环境、安装后端/前端/测试依赖、复制 `.env.example` 为 `.env`，并同时启动 FastAPI 与 Streamlit。停止服务：
+也可以直接双击 `start.bat`。脚本会自动创建 Windows 虚拟环境、安装后端/前端/测试依赖、复制 `.env.example` 为 `.env`，并同时启动 FastAPI 与 Streamlit。停止服务：
 
-```powershell
-.\stop.ps1
+```text
+.\stop.bat
 ```
+
+如果系统允许执行 PowerShell 脚本，也可以使用 `.\start.ps1` 和 `.\stop.ps1`。
 
 首次启动后，请在 `.env` 中填写 `DEEPSEEK_API_KEY`，否则页面仍可打开，但需要模型的功能会返回降级状态。
 
