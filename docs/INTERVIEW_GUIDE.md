@@ -1,130 +1,85 @@
-# Interview Guide
+# 项目面试讲解
 
-DataPilot-AI is an AI Agent Platform for Data Engineering. This document helps explain the project in resumes, interviews, and demos.
+## 一句话介绍
 
-## Project Background
+DataPilot-AI 是面向数据工程的 AI 智能体平台，用户通过统一对话入口完成知识检索、SQL 生成与审核、数仓建模；系统使用 LangGraph 规划流程、LangChain 结构化工具执行动作、RAG 提供事实依据，并支持 Docker 和本地模型部署。
 
-Data engineering work often requires switching between documents, SQL generation, query review, warehouse modeling, and platform-specific best practices. DataPilot-AI unifies these workflows behind an AI agent that can classify user intent and call the right tool automatically.
+## 项目价值
 
-## Business Value
+- 减少查文档、写 SQL、审核 SQL 和数仓建模之间的工具切换。
+- 将大模型的非确定性输出放在 Schema 校验、SQL 规则和 RAG 引用之后。
+- 用统一 Provider 端口降低对模型厂商和向量库的绑定。
+- 提供可运行、可测试、可观测、可部署的完整项目，而不是单个 Prompt 演示。
 
-- Reduces repeated manual effort for SQL writing and review.
-- Helps data engineers search technical knowledge and internal documentation.
-- Accelerates warehouse design from business requirements.
-- Provides a demo-ready AI agent platform for data engineering interviews.
-- Uses replaceable provider interfaces so enterprise deployments can switch LLMs and vector databases.
+## 核心架构取舍
 
-## Architecture Decisions
+### 为什么采用整洁架构
 
-### Clean Architecture
+应用层依赖 `LLMProvider` 和 `VectorStore` 端口，DeepSeek、Ollama、ChromaDB 位于基础设施层。切换模型或向量库时不需要重写核心用例，也便于使用 Fake Provider 做稳定测试。
 
-The project separates presentation, application, domain, and infrastructure layers. Business logic depends on domain ports such as `LLMProvider` and `VectorStore`, so DeepSeek, OpenAI, Ollama, ChromaDB, Milvus, or PGVector can be swapped without rewriting core workflows.
+### 为什么使用 LangGraph
 
-### Why LangGraph
+数据工程任务经常包含明确步骤，例如先 Text2SQL，再 SQL 审核。LangGraph 将步骤、条件路由和状态显式化，路由路径可以测试和观测；同时设置递归上限，避免循环调用。
 
-LangGraph is used for explicit agent workflow orchestration. Compared with a single prompt-based router, the graph makes routing paths observable, testable, and extensible. It supports multi-step workflows such as Text2SQL followed by SQL Review.
+### 为什么使用 LangChain StructuredTool
 
-### Why ChromaDB
+每个工具拥有名称、中文说明和 Pydantic 参数模型，可生成 JSON Schema。这样无论由确定性路由还是模型原生 Function Calling 选择工具，都复用同一套参数约束。
 
-ChromaDB is lightweight, local-first, and simple to deploy for demos and early production validation. The code depends on a vector store port, so future migration to Milvus, Weaviate, Elasticsearch Vector, or PGVector is isolated.
+### 为什么使用 ChromaDB
 
-### Why FastAPI
+ChromaDB 轻量、可本地持久化，适合演示和小团队。项目通过端口隔离实现，规模扩大后可以迁移到 Qdrant、Milvus、PGVector 或 Elasticsearch。
 
-FastAPI provides async support, Pydantic v2 validation, OpenAPI generation, dependency injection, and strong test ergonomics through TestClient. It is a good fit for production APIs and interview demos.
+### 为什么使用混合检索
 
-### Why Streamlit
+稠密向量擅长语义相似，但可能忽略表名、字段名和技术关键词。项目同时执行 Dense ANN 和 BM25，通过 RRF 融合后轻量重排，在语义问题和精确关键词之间取得平衡。
 
-Streamlit makes the product demonstrable quickly while preserving backend boundaries. The frontend calls only FastAPI APIs, so it does not access ChromaDB, DeepSeek, files, or internal services directly.
+## 高频问题
 
-### Why DeepSeek
+### 1. Agent 如何选择工具？
 
-DeepSeek provides cost-effective LLM capabilities and OpenAI-style chat APIs. The provider implementation includes async HTTP requests, streaming, retries, timeouts, health checks, and usage tracking.
+当前使用确定性意图路由识别 RAG、Text2SQL、SQL 审核、数仓设计、通用对话和组合任务。LangGraph 根据意图进入对应 StructuredTool；组合请求会先生成 SQL，再进入审核节点。
 
-## Challenges and Solutions
+### 2. 如何避免工具参数错误？
 
-| Challenge | Solution |
-| --- | --- |
-| Avoiding provider lock-in | Domain ports for LLM and vector store |
-| Making agent routing testable | Rule-based intent classifier plus LangGraph graph |
-| Preventing hallucination in RAG | Grounded prompt requiring retrieved context and citations |
-| Supporting interviews and demos | Streamlit UI plus Docker Compose deployment |
-| Keeping tests stable | Mock providers and integration fixtures instead of live LLM calls |
-| Protecting host resources | Docker Compose CPU and memory limits |
+工具调用前由 JSON Schema 描述参数，执行前由 Pydantic 校验类型、范围和必填字段；失败信息进入统一异常体系，并设置有限重试和最大工作流步数。
 
-## Performance
+### 3. 如何降低 RAG 幻觉？
 
-- Batch vector insert and delete are supported by the vector store adapter.
-- ChromaDB persistence is kept under project-local data directories.
-- FastAPI uses async endpoints and async LLM provider calls.
-- Health checks expose degraded provider or vector store states.
-- SQL Review includes deterministic rules, avoiding unnecessary LLM calls for core risk detection.
+只允许模型根据召回片段回答；返回文档名、分块位置和分数；无候选或低于阈值时拒答。进一步可以加入 Cross-Encoder、答案忠实度评测和人工审核。
 
-## Scalability
+### 4. RAG 与微调怎么选？
 
-Current deployment is suitable for single-server demos and small-team use. Future scaling paths:
+缺少动态事实或私有知识时用 RAG；缺少稳定风格、格式遵循或特定能力时考虑 SFT/LoRA。项目已实现 RAG，没有把未实现的微调训练写成现有能力。
 
-- Move ChromaDB to managed vector storage or Milvus.
-- Add database schema introspection services for Hive, Spark, and ClickHouse.
-- Add job queues for large document ingestion.
-- Add provider registry for OpenAI, Ollama, and local LLM inference.
-- Add auth, workspace isolation, and tenant-aware collections.
+### 5. 上下文和记忆如何管理？
 
-## Future Evolution
+单次任务使用 `AgentState` 工作记忆；同一 `session_id` 保存最近消息；超出窗口的历史压缩为摘要。当前是进程内短期记忆，生产长期记忆应使用 Redis 或数据库并做租户隔离。
 
-- Spark and Hive execution plan analysis.
-- ClickHouse query rewrite suggestions.
-- Kafka/Flink streaming pipeline assistant.
-- GPU-backed embedding and local LLM inference.
-- Evaluation harness for RAG quality and SQL correctness.
+### 6. Text2SQL 如何保证质量？
 
-## Common Interview Questions
+Prompt 包含引擎、Schema 和结构化输出约束；模型输出解析后执行确定性 SQL 校验，检查语句类型、表字段、JOIN 条件、`SELECT *` 和分区过滤等，再可选进入 SQL 审核。
 
-### 1. What problem does this project solve?
+### 7. 如何控制成本和延迟？
 
-It unifies common data engineering AI workflows: knowledge search, SQL generation, SQL review, warehouse modeling, and agent routing. Instead of separate tools, users ask one agent, and the system chooses the workflow automatically.
+文档切分与 Embedding 离线执行；只把 Top K 片段放入上下文；旧会话做摘要压缩；确定性规则不调用大模型；接口使用 SSE 增量显示。生产环境可增加模型分级、Prompt Cache 和 Batch API。
 
-### 2. How is the architecture organized?
+### 8. 如何评估效果？
 
-It uses Clean Architecture. FastAPI and Streamlit are presentation. RAG, Text2SQL, SQL Review, Warehouse Design, and Agent are application services. Domain ports define LLM and vector store interfaces. Infrastructure implements DeepSeek, ChromaDB, loaders, and embeddings.
+按任务拆分指标：意图准确率、RAG Precision@K/MRR/忠实度、SQL 可执行率和结果正确率、工具成功率、P95 延迟、Token 成本及真实用户反馈。项目已提供基础离线指标模型。
 
-### 3. Why not call DeepSeek directly from business logic?
+### 9. Multi-Agent 如何避免循环？
 
-Direct calls would create provider lock-in. The application layer depends on `LLMProvider`, so switching to OpenAI, Ollama, or local LLM only requires another infrastructure adapter.
+采用无环拓扑、共享 state、全局步数和深度上限、调用链 ID、明确终止条件。重要操作仍需人工确认，不能仅依赖多个 Agent 互相投票。
 
-### 4. How does the agent decide which tool to use?
+### 10. 当前项目边界是什么？
 
-The agent uses a deterministic intent router for stable behavior and LangGraph for workflow execution. It supports RAG, Text2SQL, SQL Review, Warehouse Design, General Chat, Unknown, and a chained Text2SQL plus SQL Review workflow.
+已实现完整单 Agent + 专业工具架构、本地 Ollama 和 Docker 部署。持久化长期记忆、真正多 Agent、微调训练、生产数据库执行和企业鉴权属于后续扩展。
 
-### 5. How do you prevent RAG hallucination?
+## 演示顺序
 
-The RAG prompt requires answers to use retrieved context only, state uncertainty when context is insufficient, avoid inventing technical facts, and include citations with document name, chunk reference, score, and metadata.
-
-### 6. How does Text2SQL ensure quality?
-
-It parses schema context, builds engine-specific prompts, requires structured JSON from the LLM, validates generated SQL against schema/rules, and returns confidence plus optimization suggestions.
-
-### 7. What does SQL Review check?
-
-It detects risks such as `SELECT *`, missing filters, partition-awareness issues, expensive joins, shuffle-heavy patterns, Cartesian joins, nested subqueries, and engine-specific performance problems.
-
-### 8. Why use Docker Compose?
-
-Docker Compose makes the project deployable with one command on Ubuntu 20.04. It includes backend, frontend, ChromaDB, optional Ollama, health checks, resource limits, and project-local persistence.
-
-### 9. How did you test it?
-
-The project includes unit tests, API tests, infrastructure tests, deployment tests, and integration tests. Coverage is verified with `pytest-cov` and currently exceeds the 85% target.
-
-### 10. What would you improve next?
-
-I would add Spark/Hive/ClickHouse live metadata integration, async ingestion jobs, auth, workspace isolation, local LLM support, GPU inference, and evaluation metrics for agent routing and RAG answer quality.
-
-## Demo Script
-
-1. Start Docker Compose or local backend/frontend.
-2. Open Streamlit.
-3. Upload a Spark AQE document in Knowledge Base.
-4. Ask the Agent Chat: `什么是Spark AQE`.
-5. Ask: `统计最近7天活跃用户并检查SQL`.
-6. Ask: `设计电商订单分析数仓`.
-7. Show Swagger UI and tests/coverage report.
+1. 打开工作台和 Swagger，展示健康检查与工具 Schema。
+2. 上传 Spark AQE 文档，演示混合检索、引用和低分拒答。
+3. 输入“统计最近7天活跃用户并检查 SQL”，展示多步骤路由。
+4. 输入数仓需求，展示 ODS-DWD-DWS-ADS、指标和 DDL。
+5. 使用同一 `session_id` 连续提问，展示短期记忆和清理接口。
+6. 展示 `135 passed`、Docker Compose 和 Ollama Provider。

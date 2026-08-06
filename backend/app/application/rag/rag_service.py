@@ -1,5 +1,5 @@
 from backend.app.application.rag.citation_service import CitationService
-from backend.app.application.rag.models import RAGResponse
+from backend.app.application.rag.models import RAGResponse, RetrievalMode
 from backend.app.application.rag.retrieval_service import RetrievalService
 from backend.app.domain.ports.llm_provider import LLMMessage, LLMProvider
 
@@ -42,6 +42,7 @@ class RAGService:
         top_k: int = 5,
         metadata_filter: dict[str, str | int | float | bool] | None = None,
         score_threshold: float | None = None,
+        retrieval_mode: RetrievalMode | str = RetrievalMode.HYBRID,
     ) -> RAGResponse:
         retrieved = await self.retrieval_service.retrieve(
             question,
@@ -49,6 +50,7 @@ class RAGService:
             top_k=top_k,
             metadata_filter=metadata_filter,
             score_threshold=score_threshold,
+            retrieval_mode=retrieval_mode,
         )
         citations = self.citation_service.create_citations(retrieved)
         if not retrieved:
@@ -59,6 +61,7 @@ class RAGService:
                 metadata={
                     "collection_name": collection_name,
                     "retrieved_count": 0,
+                    "retrieval_mode": RetrievalMode(retrieval_mode).value,
                 },
             )
 
@@ -83,6 +86,7 @@ class RAGService:
             metadata={
                 "collection_name": collection_name,
                 "retrieved_count": len(retrieved),
+                "retrieval_mode": RetrievalMode(retrieval_mode).value,
                 "llm_provider": llm_response.provider,
                 "llm_model": llm_response.model,
             },

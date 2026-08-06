@@ -1,13 +1,9 @@
-# Environment
+# 运行环境
 
-DataPilot-AI is the public project name for release and resume presentation.
-Runtime paths are resolved from the project root. Relative values in `.env`, `docker/.env.production`, and Docker Compose stay portable across machines.
+- Python：3.11 或更高版本。
+- 推荐环境：Conda，环境名为 `datacopilot`。
+- Node.js：仅静态 Web 或 Vercel 部署时需要。
+- Docker：部署后端、前端、ChromaDB 和可选 Ollama 时需要。
+- 操作系统：Windows、Linux 或 macOS；生产部署推荐 Linux。
 
-## 2026-06-08
-
-- Project-local virtual environment: `.venv`.
-- Created in the same style as `Yolov26`: `/opt/miniconda3/bin/python3 -m venv <project>/.venv`.
-- Python version observed from `.venv/pyvenv.cfg`: `3.12.2`.
-- Pip cache path for bootstrap: `data/cache/pip`.
-- Temporary path for bootstrap: `data/temp`.
-- No dependency files for application modules are introduced in module 1.
+所有缓存、日志、临时文件和持久化数据均放在项目内的 `.runtime/`、`data/` 或 `models/` 目录，避免污染用户目录。

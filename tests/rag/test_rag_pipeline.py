@@ -253,6 +253,37 @@ async def test_retrieval_supports_top_k_filter_and_threshold(tmp_path: Path) -> 
     assert results[0].score >= 0.1
 
 
+async def test_hybrid_retrieval_uses_bm25_when_dense_scores_tie(tmp_path: Path) -> None:
+    vector_store = FakeVectorStore()
+    ingestion = DocumentIngestionService(
+        loader_factory=DocumentLoaderFactory(),
+        chunking_service=ChunkingService(chunk_size=100, chunk_overlap=0),
+        embedding_provider=FakeEmbeddingProvider(),
+        vector_store=vector_store,
+        uploads_dir=tmp_path / "uploads",
+    )
+    distractor = tmp_path / "distractor.txt"
+    relevant = tmp_path / "hive.txt"
+    distractor.write_text("A generic unrelated document.", encoding="utf-8")
+    relevant.write_text("Hive partition pruning reduces scanned data.", encoding="utf-8")
+    await ingestion.ingest_file(distractor, collection_name="kb", domain="general")
+    await ingestion.ingest_file(relevant, collection_name="kb", domain="hive")
+    retrieval = RetrievalService(
+        embedding_provider=FakeEmbeddingProvider(),
+        vector_store=vector_store,
+    )
+
+    results = await retrieval.retrieve(
+        "How does partition pruning work?",
+        collection_name="kb",
+        top_k=1,
+        retrieval_mode="hybrid",
+    )
+
+    assert results[0].chunk.metadata.filename == "hive.txt"
+    assert results[0].lexical_score > 0
+
+
 async def test_citation_generation_and_end_to_end_rag(tmp_path: Path) -> None:
     vector_store = FakeVectorStore()
     embedding_provider = FakeEmbeddingProvider()

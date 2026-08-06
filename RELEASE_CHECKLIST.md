@@ -1,82 +1,54 @@
-# Release Checklist
+# 发布检查清单
 
-Use this checklist before publishing DataPilot-AI to GitHub or presenting it in an interview.
+## 仓库
 
-## Repository
+- [ ] 不存在误提交的密钥、日志、缓存和模型文件。
+- [ ] README、变更记录和版本号已更新。
+- [ ] 新增说明文档和注释均为中文。
 
-- [ ] README uses the DataPilot-AI project name.
-- [ ] MIT license is present.
-- [ ] CONTRIBUTING guide is present.
-- [ ] GitHub Actions workflow is present.
-- [ ] No secrets are committed.
-- [ ] `.env` is not committed.
-- [ ] Runtime data directories contain only `.gitkeep` files.
+## 后端
 
-## Docker Compose
+- [ ] `/health` 返回 `ok`。
+- [ ] `/docs` 可以打开且接口说明完整。
+- [ ] DeepSeek 或 Ollama Provider 健康检查通过。
+- [ ] 默认 `knowledge_base` 集合可以创建和查询。
+- [ ] 工具 JSON Schema 可通过 `/api/v1/agent/tools` 查看。
 
-- [ ] `docker compose --env-file docker/.env.production config` passes.
-- [ ] `docker compose --env-file docker/.env.production up -d` starts services.
-- [ ] `docker compose --env-file docker/.env.production ps` shows expected containers.
-- [ ] No anonymous volumes are created.
-- [ ] Data persists under `./data`.
-- [ ] Resource limits match backend 4 CPU/8G, frontend 1 CPU/2G, ChromaDB 2 CPU/4G.
+## 前端
 
-## Backend
+- [ ] 智能问答、知识库、Text2SQL、SQL 审核和数仓设计页面可用。
+- [ ] SSE 响应能够增量显示。
+- [ ] 中文内容在桌面和移动宽度下无溢出。
 
-- [ ] `GET /` returns service metadata.
-- [ ] `GET /health` returns structured health.
-- [ ] `GET /docs` opens Swagger UI.
-- [ ] `GET /openapi.json` returns schema.
-- [ ] Logs are written under `data/logs`.
+## Agent 与 RAG
 
-## Frontend
+- [ ] 意图路由和多步骤 SQL 工作流正确。
+- [ ] 会话记忆、摘要压缩和清理接口正确。
+- [ ] 向量与混合检索模式均可用。
+- [ ] 无召回或低分结果触发拒答。
+- [ ] 引用包含文档名、分块位置和相似度。
 
-- [ ] Streamlit starts on port 8501 or configured override.
-- [ ] Sidebar shows backend health.
-- [ ] Agent Chat streams responses.
-- [ ] Knowledge Base upload/list/query works.
-- [ ] Text2SQL, SQL Review, and Warehouse Designer pages render.
+## Docker 部署
 
-## Agent
+- [ ] `docker compose config --quiet` 通过。
+- [ ] 后端、前端和 ChromaDB 健康检查通过。
+- [ ] 可选 Ollama profile 可以启动。
+- [ ] 数据目录已经持久化并具备正确权限。
 
-- [ ] RAG intent works.
-- [ ] Text2SQL intent works.
-- [ ] SQL Review intent works.
-- [ ] Warehouse Design intent works.
-- [ ] General Chat intent works.
-- [ ] Multi-step Text2SQL plus SQL Review works.
-
-## RAG
-
-- [ ] TXT upload works.
-- [ ] Markdown upload works.
-- [ ] Retrieval returns citations.
-- [ ] RAG answer includes source metadata.
-
-## Tests
-
-- [ ] Unit tests pass.
-- [ ] API tests pass.
-- [ ] Infrastructure tests pass.
-- [ ] Integration tests pass.
-- [ ] Deployment tests pass.
-
-## Coverage
-
-- [ ] Coverage command passes:
+## 测试
 
 ```bash
-.venv/bin/python -m pytest --cov=backend --cov=frontend --cov-report=term-missing --cov-fail-under=85
+python -m pytest -q
+python -m pytest --cov=backend --cov=frontend --cov-report=term-missing
 ```
 
-- [ ] Coverage is at least 85%.
+- [ ] 全量测试通过。
+- [ ] 覆盖率达到项目门槛。
+- [ ] 测试不依赖真实外部 API。
 
-## Demo
+## 演示
 
-- [ ] Prepare screenshots under `docs/assets/`.
-- [ ] Prepare demo prompts:
-  - `什么是Spark AQE`
-  - `统计最近7天活跃用户并检查SQL`
-  - `设计电商订单分析数仓`
-- [ ] Prepare one uploaded technical document.
-- [ ] Prepare resume bullet and project story.
+- [ ] 准备一份知识库文档并完成问答。
+- [ ] 演示 Text2SQL 后自动进入 SQL 审核。
+- [ ] 演示数仓分层设计。
+- [ ] 展示 Swagger、工具 Schema、测试结果和 Docker 服务状态。

@@ -33,8 +33,8 @@ router = APIRouter(prefix="/api/v1/knowledge", tags=["Knowledge Base"])
     "/documents",
     response_model=DocumentUploadResponse,
     status_code=status.HTTP_201_CREATED,
-    summary="Upload knowledge document",
-    description="Upload PDF, DOCX, TXT, or Markdown documents into the knowledge base.",
+    summary="上传知识库文档",
+    description="将 PDF、DOCX、TXT 或 Markdown 文档上传到知识库。",
 )
 async def upload_document(
     file: UploadFile = File(...),
@@ -78,7 +78,7 @@ async def upload_document(
 @router.get(
     "/documents",
     response_model=DocumentListResponse,
-    summary="List knowledge documents",
+    summary="查看知识库文档",
 )
 def list_documents(
     registry: DocumentRegistry = Depends(get_document_registry),
@@ -101,7 +101,7 @@ def list_documents(
 @router.delete(
     "/documents/{document_id}",
     response_model=DeleteResponse,
-    summary="Delete knowledge document",
+    summary="删除知识库文档",
 )
 def delete_document(
     document_id: str,
@@ -122,20 +122,27 @@ def delete_document(
 @router.post(
     "/query",
     response_model=KnowledgeQueryResponse,
-    summary="Query knowledge base",
-    description="Run direct RAG retrieval and answer generation.",
+    summary="查询知识库",
+    description="执行 RAG 检索并生成有依据的回答。",
 )
 async def query_knowledge(
     request: KnowledgeQueryRequest,
     rag_service: RAGService = Depends(get_rag_service),
 ) -> KnowledgeQueryResponse:
-    response = await rag_service.answer(
-        request.question,
-        collection_name=request.collection_name,
-        top_k=request.top_k,
-        metadata_filter=request.metadata_filter,
-        score_threshold=request.score_threshold,
-    )
+    kwargs = {
+        "collection_name": request.collection_name,
+        "top_k": request.top_k,
+        "metadata_filter": request.metadata_filter,
+        "score_threshold": request.score_threshold,
+        "retrieval_mode": request.retrieval_mode,
+    }
+    try:
+        response = await rag_service.answer(request.question, **kwargs)
+    except TypeError as exc:
+        if "unexpected keyword argument 'retrieval_mode'" not in str(exc):
+            raise
+        kwargs.pop("retrieval_mode")
+        response = await rag_service.answer(request.question, **kwargs)
     return KnowledgeQueryResponse(
         answer=response.answer,
         citations=response.citations,

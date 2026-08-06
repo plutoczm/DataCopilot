@@ -24,6 +24,16 @@ def test_compose_defines_required_services_profiles_and_network() -> None:
     assert "datacopilot" in compose["networks"]
 
 
+def test_compose_backend_exposes_routing_and_local_model_env_passthrough() -> None:
+    compose = load_compose()
+    backend_env = compose["x-backend-env"]
+
+    assert backend_env["DATACOPILOT_LLM__ROUTING_ENABLED"] == "${ROUTING_ENABLED:-false}"
+    assert backend_env["DATACOPILOT_LOCAL__ENABLED"] == "${LOCAL_MODEL_ENABLED:-false}"
+    assert backend_env["DATACOPILOT_LOCAL__BASE_URL"].startswith("${LOCAL_MODEL_BASE_URL")
+    assert backend_env["DATACOPILOT_LOCAL__CHAT_MODEL"].startswith("${LOCAL_MODEL_NAME")
+
+
 def test_compose_uses_only_project_local_bind_mounts_and_no_anonymous_volumes() -> None:
     compose = load_compose()
 

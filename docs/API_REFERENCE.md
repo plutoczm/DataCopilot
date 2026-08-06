@@ -1,165 +1,113 @@
-# API Reference
+# API 接口参考
 
-Base URL:
+默认地址：`http://127.0.0.1:8000`。交互式 Swagger 文档位于 `/docs`，OpenAPI JSON 位于 `/openapi.json`。
 
-```text
-http://localhost:8000
+所有 JSON 请求使用 `Content-Type: application/json`。参数校验失败返回统一错误结构：
+
+```json
+{
+  "error": {
+    "code": "validation_error",
+    "message": "请求参数校验失败",
+    "details": []
+  }
+}
 ```
 
-Interactive Swagger UI:
+## 健康与配置
 
-```text
-http://localhost:8000/docs
-```
+### `GET /health`
 
-## Health
-
-### GET `/health`
-
-Checks application, LLM provider, and vector store status.
+检查应用、大模型 Provider 和向量库。
 
 ```bash
-curl http://localhost:8000/health
+curl http://127.0.0.1:8000/health
 ```
-
-Example response:
 
 ```json
 {
   "service": "DataPilot-AI",
   "status": "ok",
-  "environment": "production",
+  "environment": "development",
   "llm_provider": {
     "provider": "deepseek",
     "ok": true,
-    "api_key_configured": true,
-    "reachable": true,
-    "model_available": true,
-    "model": "deepseek-chat",
-    "message": "DeepSeek provider is healthy"
+    "model": "deepseek-chat"
   },
   "vector_store": {
     "status": "ok",
     "collection_name": "knowledge_base",
-    "document_count": 12
+    "document_count": 0
   }
 }
 ```
 
-## Runtime Config
+### `GET /api/v1/config/runtime`
 
-### GET `/api/v1/config/runtime`
+返回不含密钥的运行环境、默认 Provider、Embedding 模型和能力开关。
 
-Returns public runtime capabilities without secrets.
+## 知识库
 
-```bash
-curl http://localhost:8000/api/v1/config/runtime
-```
+### `POST /api/v1/knowledge/documents`
 
-## Knowledge Base
-
-### POST `/api/v1/knowledge/documents`
-
-Uploads and indexes a document.
+上传 PDF、DOCX、TXT 或 Markdown 文档。请求类型为 `multipart/form-data`。
 
 ```bash
-curl -X POST http://localhost:8000/api/v1/knowledge/documents \
+curl -X POST http://127.0.0.1:8000/api/v1/knowledge/documents \
+  -F "file=@knowledge_base/spark/spark_aqe.md" \
   -F "collection_name=knowledge_base" \
   -F "domain=spark" \
-  -F "tags=spark,aqe" \
-  -F "file=@spark_aqe.md"
+  -F "tags=spark,aqe"
 ```
 
-Example response:
+响应包含 `document_id`、文件信息、集合名和分块数量。
 
-```json
-{
-  "document_id": "doc-1",
-  "filename": "spark_aqe.md",
-  "file_type": "md",
-  "domain": "spark",
-  "collection_name": "knowledge_base",
-  "chunk_count": 8
-}
-```
+### `GET /api/v1/knowledge/documents`
 
-### GET `/api/v1/knowledge/documents`
+查看当前进程登记的已摄取文档。
 
-Lists indexed documents.
+### `DELETE /api/v1/knowledge/documents/{document_id}`
+
+删除文档登记信息和对应向量分块。
+
+### `POST /api/v1/knowledge/query`
+
+直接执行 RAG 查询。
 
 ```bash
-curl http://localhost:8000/api/v1/knowledge/documents
-```
-
-### DELETE `/api/v1/knowledge/documents/{document_id}`
-
-Deletes a document and associated vectors.
-
-```bash
-curl -X DELETE http://localhost:8000/api/v1/knowledge/documents/doc-1
-```
-
-### POST `/api/v1/knowledge/query`
-
-Runs a direct RAG query.
-
-```bash
-curl -X POST http://localhost:8000/api/v1/knowledge/query \
+curl -X POST http://127.0.0.1:8000/api/v1/knowledge/query \
   -H "Content-Type: application/json" \
   -d '{
-    "question": "How does Spark AQE reduce shuffle cost?",
+    "question": "Spark AQE 有什么作用？",
     "collection_name": "knowledge_base",
-    "top_k": 5
+    "top_k": 5,
+    "retrieval_mode": "hybrid",
+    "score_threshold": 0.2
   }'
 ```
 
-Example response:
+关键参数：
 
-```json
-{
-  "answer": "Spark AQE can optimize shuffle partitions and join strategies at runtime.",
-  "citations": [
-    {
-      "document_name": "spark_aqe.md",
-      "chunk_reference": "spark_aqe.md#chunk-0",
-      "similarity_score": 0.96,
-      "source_metadata": {
-        "document_id": "doc-1",
-        "filename": "spark_aqe.md",
-        "domain": "spark",
-        "chunk_index": 0
-      }
-    }
-  ],
-  "metadata": {
-    "collection_name": "knowledge_base",
-    "retrieved_count": 1
-  },
-  "token_usage": {
-    "prompt_tokens": 120,
-    "completion_tokens": 80,
-    "total_tokens": 200
-  }
-}
-```
+| 参数 | 类型 | 默认值 | 说明 |
+| --- | --- | --- | --- |
+| `question` | string | 必填 | 用户问题 |
+| `collection_name` | string | `knowledge_base` | 知识库集合 |
+| `top_k` | integer | `5` | 最终召回数量，范围 1-20 |
+| `retrieval_mode` | string | `hybrid` | `hybrid` 或 `vector` |
+| `metadata_filter` | object | `null` | ChromaDB 元数据过滤条件 |
+| `score_threshold` | number | `null` | 最低相关度，范围 0-1 |
 
-## Streaming Chat
+响应包含 `answer`、`citations`、检索元数据和 Token 使用量。
 
-### POST `/api/v1/chat/stream`
+## RAG 流式对话
 
-Streams a RAG chat response as Server Sent Events.
+### `POST /api/v1/chat/stream`
 
-```bash
-curl -N -X POST http://localhost:8000/api/v1/chat/stream \
-  -H "Content-Type: application/json" \
-  -d '{"message":"Explain Hive partition pruning","collection_name":"knowledge_base"}'
-```
-
-SSE events:
+参数与知识库查询基本一致，问题字段名为 `message`。响应类型为 `text/event-stream`：
 
 ```text
 event: token
-data: {"text":"..."}
+data: {"text":"Spark AQE ..."}
 
 event: citations
 data: {"citations":[...]}
@@ -168,163 +116,129 @@ event: done
 data: {"metadata":{...}}
 ```
 
-## Agent
+## 统一智能体
 
-### POST `/api/v1/agent/chat`
+### `GET /api/v1/agent/tools`
 
-Classifies intent and invokes the correct workflow.
+查看所有 LangChain 结构化工具的名称、中文说明和 Pydantic JSON Schema。
+
+### `POST /api/v1/agent/chat`
+
+自动识别意图并执行 RAG、Text2SQL、SQL 审核、数仓设计或通用对话。
 
 ```bash
-curl -X POST http://localhost:8000/api/v1/agent/chat \
+curl -X POST http://127.0.0.1:8000/api/v1/agent/chat \
   -H "Content-Type: application/json" \
   -d '{
-    "message": "统计最近7天活跃用户并检查SQL",
+    "message": "统计最近7天活跃用户并检查 SQL",
+    "session_id": "demo-session",
     "engine": "hive",
-    "schema_context": "dwd_user_behavior_detail(user_id bigint, dt string)"
+    "schema_context": "dwd_user_behavior_detail(user_id bigint, dt string)",
+    "retrieval_mode": "hybrid"
   }'
 ```
 
-Example response:
+响应示例：
 
 ```json
 {
   "intent": "TEXT2SQL_SQL_REVIEW",
   "result": {
-    "generated_sql": {
-      "sql": "SELECT COUNT(DISTINCT user_id) AS active_users FROM dwd_user_behavior_detail WHERE dt >= date_sub(current_date, 7)"
-    },
-    "review": {
-      "risk_level": "LOW",
-      "score": 94
-    }
+    "generated_sql": {},
+    "review": {}
   },
-  "routing_path": ["classify_intent", "text2sql", "sql_review", "format_response"],
-  "final_response": "Generated SQL...",
+  "routing_path": [
+    "classify_intent",
+    "text2sql",
+    "sql_review",
+    "format_response"
+  ],
+  "final_response": "...",
   "metadata": {
-    "tool_usage": {
-      "text2sql": 1,
-      "sql_review": 1
-    }
+    "intent_confidence": 0.95,
+    "tool_usage": {"text2sql": 1, "sql_review": 1},
+    "max_steps": 8,
+    "memory": {"short_term_messages": 2},
+    "validation": {"total": 2, "errors": 0, "warnings": 0, "ok": 2}
   },
-  "token_usage": {
-    "prompt_tokens": 20,
-    "completion_tokens": 15,
-    "total_tokens": 35
-  }
+  "token_usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
 }
 ```
 
-### POST `/api/v1/agent/chat/stream`
+响应说明：
 
-Streams agent metadata, response text, structured result, and completion event.
+- `result.validation`：`validate_result` 节点的完整校验结果（Text2SQL 分支保留 SQL 级校验 `is_valid`/`issues`；RAG、SQL 审核、数仓设计分支为智能体级校验 `{is_valid, checks, summary}`）。
+- `metadata.validation`：校验摘要 `{total, errors, warnings, ok}`。
+
+### `POST /api/v1/agent/chat/stream`
+
+请求参数与非流式智能体接口一致。事件顺序为 `metadata`、一个或多个 `token`、`result`、`done`。
+
+### `DELETE /api/v1/agent/sessions/{session_id}`
+
+清除指定会话的进程内短期记忆和摘要。
+
+## 自然语言转 SQL（Text2SQL）
+
+### `POST /api/v1/text2sql`
 
 ```bash
-curl -N -X POST http://localhost:8000/api/v1/agent/chat/stream \
-  -H "Content-Type: application/json" \
-  -d '{"message":"设计电商订单数仓"}'
-```
-
-## Text2SQL
-
-### POST `/api/v1/text2sql`
-
-Generates validated SQL.
-
-```bash
-curl -X POST http://localhost:8000/api/v1/text2sql \
+curl -X POST http://127.0.0.1:8000/api/v1/text2sql \
   -H "Content-Type: application/json" \
   -d '{
     "question": "统计最近7天活跃用户",
     "engine": "hive",
-    "schema_context": "dwd_user_behavior_detail(user_id bigint, dt string)"
+    "schema_context": "dwd_user_behavior_detail(user_id bigint, dt string)",
+    "use_rag": false
   }'
 ```
 
-## SQL Review
+支持的引擎：`hive`、`spark_sql`、`mysql`、`clickhouse`。响应包含 SQL、解释、优化建议、置信度、校验结果和 Token 使用量。
 
-### POST `/api/v1/sql-review`
+## SQL 审核
 
-Reviews SQL quality, performance, and risk.
+### `POST /api/v1/sql-review`
 
 ```bash
-curl -X POST http://localhost:8000/api/v1/sql-review \
+curl -X POST http://127.0.0.1:8000/api/v1/sql-review \
   -H "Content-Type: application/json" \
   -d '{
     "sql": "SELECT * FROM dwd_order_detail",
-    "engine": "spark",
+    "engine": "spark_sql",
     "include_llm_explanation": true
   }'
 ```
 
-Example response:
+响应包含风险等级、质量分数、问题列表、优化建议和可选大模型解释。
 
-```json
-{
-  "risk_level": "HIGH",
-  "score": 42,
-  "issues": [
-    {
-      "code": "select_star",
-      "title": "SELECT * detected",
-      "description": "Avoid scanning unnecessary columns.",
-      "severity": "MEDIUM",
-      "suggestion": "Select required columns only.",
-      "category": "general"
-    }
-  ],
-  "optimization_suggestions": ["Select required columns only."],
-  "llm_explanation": "The query scans more data than needed.",
-  "engine": "spark_sql",
-  "token_usage": {
-    "prompt_tokens": 50,
-    "completion_tokens": 30,
-    "total_tokens": 80
-  },
-  "metadata": {}
-}
-```
+### `POST /api/v1/sql-review/generate-and-review`
 
-## Warehouse Design
+在单个接口中先执行 Text2SQL，再审核生成的 SQL。
 
-### POST `/api/v1/warehouse-design`
+## 数仓设计
 
-Generates layered warehouse design, DDL, metrics, and recommendations.
+### `POST /api/v1/warehouse-design`
 
 ```bash
-curl -X POST http://localhost:8000/api/v1/warehouse-design \
+curl -X POST http://127.0.0.1:8000/api/v1/warehouse-design \
   -H "Content-Type: application/json" \
   -d '{
     "requirement": "设计电商订单分析数仓",
-    "use_rag": true
+    "use_rag": true,
+    "rag_collection_name": "knowledge_base"
   }'
 ```
 
-Example response shape:
+响应包含 ODS、DWD、DWS、ADS、维度表、事实表、指标、关系、DDL、数据流和设计建议。
 
-```json
-{
-  "requirement": "设计电商订单分析数仓",
-  "ods": [],
-  "dwd": [],
-  "dws": [],
-  "ads": [],
-  "dim": [],
-  "fact_tables": [],
-  "ddl": [
-    {
-      "table_name": "dwd_order_detail",
-      "layer": "DWD",
-      "sql": "CREATE TABLE dwd_order_detail (...) PARTITIONED BY (dt STRING) STORED AS PARQUET;"
-    }
-  ],
-  "metrics": [
-    {
-      "name": "GMV",
-      "definition": "Gross merchandise volume",
-      "calculation_logic": "SUM(pay_amount)",
-      "business_meaning": "Measures transaction scale."
-    }
-  ],
-  "recommendations": ["Partition Strategy: partition all fact and summary tables by dt."]
-}
-```
+## 状态码
+
+| 状态码 | 说明 |
+| --- | --- |
+| `200` | 请求成功 |
+| `201` | 文档创建成功 |
+| `400` | 文件类型或业务参数错误 |
+| `404` | 文档或资源不存在 |
+| `422` | Pydantic 参数校验失败 |
+| `500` | 智能体或向量库内部错误 |
+| `502` | 大模型 Provider 调用失败 |

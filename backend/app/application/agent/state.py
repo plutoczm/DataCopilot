@@ -26,3 +26,4 @@ class AgentState(TypedDict):
     token_usage: LLMUsage
     tool_usage: dict[str, int]
     errors: list[str]
+    validation: NotRequired[dict[str, Any]]

@@ -7,6 +7,7 @@ class WarehouseDesignPromptBuilder:
         *,
         requirement: str,
         rag_context: str | None = None,
+        recommendation_language: str = "zh-CN",
     ) -> list[LLMMessage]:
         system_prompt = "\n".join(
             [
@@ -22,6 +23,7 @@ class WarehouseDesignPromptBuilder:
                 self._design_scope(),
                 self._ddl_rules(),
                 self._metric_rules(),
+                self._recommendation_language(recommendation_language),
                 self._rag_section(rag_context),
                 self._output_contract(),
             ]
@@ -30,6 +32,12 @@ class WarehouseDesignPromptBuilder:
             LLMMessage(role="system", content=system_prompt),
             LLMMessage(role="user", content=user_prompt),
         ]
+
+    @staticmethod
+    def _recommendation_language(language: str) -> str:
+        if language == "zh-CN":
+            return "Recommendation Language: write every item in recommendations in Simplified Chinese."
+        return "Recommendation Language: write every item in recommendations in English."
 
     def _design_scope(self) -> str:
         return "\n".join(

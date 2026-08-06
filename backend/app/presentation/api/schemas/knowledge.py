@@ -1,6 +1,6 @@
 from pydantic import BaseModel, Field
 
-from backend.app.application.rag.models import Citation
+from backend.app.application.rag.models import Citation, RetrievalMode
 from backend.app.domain.ports.llm_provider import LLMUsage
 
 
@@ -27,11 +27,12 @@ class DocumentListResponse(BaseModel):
 
 
 class KnowledgeQueryRequest(BaseModel):
-    question: str = Field(min_length=1, examples=["How does Spark AQE help?"])
+    question: str = Field(min_length=1, examples=["Spark AQE 有什么作用？"])
     collection_name: str = Field(default="knowledge_base")
     top_k: int = Field(default=5, ge=1, le=20)
     metadata_filter: dict[str, str | int | float | bool] | None = None
     score_threshold: float | None = Field(default=None, ge=0.0, le=1.0)
+    retrieval_mode: RetrievalMode = RetrievalMode.HYBRID
 
 
 class KnowledgeQueryResponse(BaseModel):
@@ -42,11 +43,12 @@ class KnowledgeQueryResponse(BaseModel):
 
 
 class ChatStreamRequest(BaseModel):
-    message: str = Field(min_length=1, examples=["Explain Hive partition pruning."])
+    message: str = Field(min_length=1, examples=["解释 Hive 分区裁剪的原理。"])
     collection_name: str = Field(default="knowledge_base")
     top_k: int = Field(default=5, ge=1, le=20)
     metadata_filter: dict[str, str | int | float | bool] | None = None
     score_threshold: float | None = Field(default=None, ge=0.0, le=1.0)
+    retrieval_mode: RetrievalMode = RetrievalMode.HYBRID
 
 
 class RuntimeConfigResponse(BaseModel):

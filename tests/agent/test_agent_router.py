@@ -253,9 +253,17 @@ async def test_agent_graph_streams_events() -> None:
         )
     ]
 
-    assert [event["event"] for event in events] == ["metadata", "token", "result", "done"]
+    event_names = [event["event"] for event in events]
+    assert event_names[0] == "metadata"
+    assert event_names[-2:] == ["result", "done"]
+    assert event_names.count("token") > 1
+    streamed_text = "".join(
+        event["data"]["text"] for event in events if event["event"] == "token"
+    )
+    assert "Generated SQL" in streamed_text
     assert events[0]["data"]["intent"] == "TEXT2SQL_SQL_REVIEW"
-    assert "generated_sql" in events[2]["data"]["result"]
+    result_event = next(event for event in events if event["event"] == "result")
+    assert "generated_sql" in result_event["data"]["result"]
 
 
 def test_agent_api_returns_structured_response() -> None:

@@ -37,21 +37,21 @@ def create_app() -> FastAPI:
 
     app = FastAPI(
         title=settings.app.name,
-        description="AI Data Engineering Copilot Platform API",
+        description="AI 数据工程智能助手平台 API",
         version=APP_VERSION,
         docs_url="/docs",
         redoc_url="/redoc",
         openapi_url="/openapi.json",
         lifespan=lifespan,
         openapi_tags=[
-            {"name": "Health", "description": "Application and dependency health."},
-            {"name": "Config", "description": "Runtime capability discovery."},
-            {"name": "Knowledge Base", "description": "Document ingestion and RAG query APIs."},
-            {"name": "Chat", "description": "Streaming chat APIs."},
-            {"name": "Text2SQL", "description": "Natural language to SQL generation APIs."},
-            {"name": "SQL Review", "description": "SQL quality, risk, and optimization review APIs."},
-            {"name": "Warehouse Design", "description": "Layered data warehouse design generation APIs."},
-            {"name": "Agent", "description": "Unified LangGraph agent routing APIs."},
+            {"name": "Health", "description": "应用及依赖健康状态。"},
+            {"name": "Config", "description": "运行时能力查询。"},
+            {"name": "Knowledge Base", "description": "文档摄取与 RAG 查询接口。"},
+            {"name": "Chat", "description": "流式对话接口。"},
+            {"name": "Text2SQL", "description": "自然语言生成 SQL 接口。"},
+            {"name": "SQL Review", "description": "SQL 质量、风险与优化审核接口。"},
+            {"name": "Warehouse Design", "description": "分层数仓设计生成接口。"},
+            {"name": "Agent", "description": "统一 LangGraph 智能体路由接口。"},
         ],
     )
     logger = setup_fastapi_logging(app, settings)
@@ -74,7 +74,7 @@ def create_app() -> FastAPI:
             content=ErrorResponse(
                 error=ErrorDetail(
                     code="validation_error",
-                    message="Request validation failed",
+                    message="请求参数校验失败",
                     details=[dict(error) for error in exc.errors()],
                 )
             ).model_dump(mode="json"),
@@ -118,7 +118,7 @@ def create_app() -> FastAPI:
             content=ErrorResponse(
                 error=ErrorDetail(
                     code="internal_server_error",
-                    message="Internal server error",
+                    message="服务器内部错误",
                 )
             ).model_dump(mode="json"),
         )

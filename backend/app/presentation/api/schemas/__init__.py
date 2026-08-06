@@ -1,1 +1,1 @@
-"""API schema package."""
+"""API 数据模型包。"""

@@ -1,1 +1,1 @@
-"""Core backend facilities package."""
+"""后端核心基础设施包。"""

@@ -54,13 +54,27 @@ def render() -> None:
 
     st.session_state.setdefault("warehouse_design_requirement", "设计电商订单分析数仓")
     requirement = st.text_area("业务需求", key="warehouse_design_requirement", height=120)
-    use_rag = st.checkbox("使用知识库上下文", value=True)
+    option_columns = st.columns(2)
+    with option_columns[0]:
+        use_rag = st.checkbox("使用知识库上下文", value=True)
+    with option_columns[1]:
+        recommendation_language = st.radio(
+            "建议语言",
+            options=["中文", "English"],
+            horizontal=True,
+            key="warehouse_recommendation_language",
+        )
 
     if not st.button("生成数仓方案", type="primary"):
         return
 
     try:
-        result = get_client().warehouse_design(requirement, use_rag=use_rag)
+        language_code = "zh-CN" if recommendation_language == "中文" else "en"
+        result = get_client().warehouse_design(
+            requirement,
+            use_rag=use_rag,
+            recommendation_language=language_code,
+        )
         st.success("数仓方案已生成")
         st.download_button(
             "导出结果",

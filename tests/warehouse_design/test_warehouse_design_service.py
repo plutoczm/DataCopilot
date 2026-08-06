@@ -191,9 +191,26 @@ async def test_design_service_generates_complete_ecommerce_design_with_ddl_and_m
         {metric.name for metric in result.metrics}
     )
     assert result.data_flow.dependency_graph
-    assert any("Partition Strategy" in recommendation for recommendation in result.recommendations)
+    assert any("分区策略" in recommendation for recommendation in result.recommendations)
+    assert result.metadata["recommendation_language"] == "zh-CN"
     prompt = "\n".join(message.content for message in llm.messages)
     assert "设计电商订单分析数仓" in prompt
+    assert "Simplified Chinese" in prompt
+
+
+async def test_design_service_can_generate_english_recommendations() -> None:
+    llm = FakeLLMProvider()
+    service = WarehouseDesignService(llm_provider=llm)
+
+    result = await service.design(
+        requirement="设计电商订单分析数仓",
+        recommendation_language="en",
+    )
+
+    assert any("Partition Strategy" in item for item in result.recommendations)
+    assert result.metadata["recommendation_language"] == "en"
+    prompt = "\n".join(message.content for message in llm.messages)
+    assert "recommendations in English" in prompt
 
 
 async def test_design_service_uses_rag_context_when_enabled() -> None:

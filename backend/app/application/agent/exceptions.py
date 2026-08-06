@@ -1,14 +1,14 @@
 class AgentError(Exception):
-    """Base exception for DataPilot-AI agent failures."""
+    """DataPilot-AI 智能体故障的基础异常。"""
 
 
 class IntentClassificationError(AgentError):
-    """Raised when the agent cannot classify a user request."""
+    """智能体无法识别用户意图时抛出。"""
 
 
 class AgentRoutingError(AgentError):
-    """Raised when the agent cannot route a classified request."""
+    """智能体无法路由已分类请求时抛出。"""
 
 
 class AgentExecutionError(AgentError):
-    """Raised when an agent specialist node fails."""
+    """智能体专业节点执行失败时抛出。"""

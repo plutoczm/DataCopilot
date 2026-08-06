@@ -11,6 +11,8 @@ class _NoopStreamlit:
                 return False
             if name in {"text_area", "text_input", "selectbox"}:
                 return kwargs.get("value") or (args[1] if len(args) > 1 else "")
+            if name == "segmented_control":
+                return kwargs.get("default")
             if name == "slider":
                 return kwargs.get("value", 5)
             if name == "file_uploader":

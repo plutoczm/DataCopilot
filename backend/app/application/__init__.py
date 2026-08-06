@@ -1,1 +1,1 @@
-"""Application use-case package."""
+"""应用层用例包。"""

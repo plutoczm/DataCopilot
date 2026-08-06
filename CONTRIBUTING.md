@@ -1,53 +1,45 @@
-# Contributing
+# 参与贡献
 
-Thanks for your interest in DataPilot-AI.
-
-## Development Setup
+## 开发环境
 
 ```bash
-scripts/bootstrap_venv.sh
-.venv/bin/pip install -r backend/requirements.txt -r frontend/requirements.txt -r requirements-dev.txt
-cp .env.example .env
+conda env create -f environment.yml
+conda activate datacopilot
+python -m pytest -q
 ```
 
-## Branch Workflow
+复制 `.env.example` 为 `.env`，密钥只保存在本地，不得提交到仓库。
 
-1. Create a feature branch.
-2. Keep changes focused.
-3. Add or update tests.
-4. Run the full test suite.
-5. Open a pull request with a concise summary.
+## 分支流程
 
-## Test Commands
+1. 从最新主分支创建功能分支。
+2. 每次提交只解决一个明确问题。
+3. 修改行为时同步补充测试和中文文档。
+4. 提交前运行全量测试和 `docker compose config --quiet`。
 
-```bash
-.venv/bin/python -m pytest -v
-.venv/bin/python -m pytest --cov=backend --cov=frontend --cov-report=term-missing --cov-fail-under=85
-```
+## 架构约束
 
-## Architecture Rules
+- 表现层不得直接访问 ChromaDB、文件系统或大模型接口。
+- 应用层依赖领域端口，不直接依赖具体基础设施实现。
+- 工具输入必须使用 Pydantic 模型和 JSON Schema 校验。
+- 新增 Provider 时实现统一的 `LLMProvider` 或 `VectorStore` 端口。
+- 不在业务代码中硬编码密钥、绝对路径和生产地址。
 
-- Application code depends on domain ports, not concrete infrastructure.
-- Do not call DeepSeek, ChromaDB, or filesystem internals directly from business services.
-- Frontend code must call FastAPI APIs only.
-- Keep all runtime data under the project `data/` directory.
-- Add tests for new behavior.
-
-## Commit Style
-
-Use clear messages:
+## 提交格式
 
 ```text
-feat: add spark plan analyzer
-fix: handle missing document metadata
-docs: update deployment guide
-test: add agent integration workflow
+feat: 新增功能
+fix: 修复问题
+docs: 更新文档
+test: 补充测试
+refactor: 重构但不改变行为
 ```
 
-## Pull Request Checklist
+## 合并请求检查
 
-- [ ] Tests pass.
-- [ ] Coverage remains at or above 85%.
-- [ ] Docker Compose config validates.
-- [ ] No secrets are committed.
-- [ ] Documentation is updated when behavior changes.
+- [ ] 代码和提交内容聚焦于当前任务。
+- [ ] 新增说明、注释和界面文案使用中文。
+- [ ] 接口兼容性已经确认。
+- [ ] 单元测试和集成测试通过。
+- [ ] Docker 配置可以正常解析。
+- [ ] 文档准确区分已实现能力和规划能力。

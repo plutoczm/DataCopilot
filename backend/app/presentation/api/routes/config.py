@@ -11,8 +11,8 @@ router = APIRouter(prefix="/api/v1/config", tags=["Config"])
 @router.get(
     "/runtime",
     response_model=RuntimeConfigResponse,
-    summary="Runtime capabilities",
-    description="Return non-secret runtime capabilities and provider selections.",
+    summary="运行时能力",
+    description="返回不含敏感信息的运行能力和提供方选择。",
 )
 def runtime_config(settings: Settings = Depends(get_app_settings)) -> RuntimeConfigResponse:
     return RuntimeConfigResponse(

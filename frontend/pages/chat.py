@@ -1,5 +1,6 @@
 from pathlib import Path
 import sys
+import uuid
 
 
 def _bootstrap_project_root() -> None:
@@ -29,6 +30,7 @@ def render() -> None:
     )
 
     st.session_state.setdefault("chat_history", [])
+    st.session_state.setdefault("agent_session_id", str(uuid.uuid4()))
     selected = quick_actions(
         "演示问题",
         [
@@ -67,6 +69,11 @@ def render() -> None:
         engine = st.selectbox("SQL 引擎", ["hive", "spark_sql", "mysql", "clickhouse"])
         schema_context = st.text_area("表结构上下文", height=120)
         use_rag = st.checkbox("专业工具启用 RAG 上下文", value=False)
+        retrieval_mode = st.segmented_control(
+            "检索模式",
+            options=["hybrid", "vector"],
+            default="hybrid",
+        )
 
     for item in st.session_state["chat_history"]:
         render_message(item["role"], item["content"])
@@ -95,6 +102,8 @@ def render() -> None:
                 collection_name=collection_name,
                 top_k=top_k,
                 use_rag=use_rag,
+                session_id=st.session_state["agent_session_id"],
+                retrieval_mode=retrieval_mode or "hybrid",
             ):
                 if event["event"] == "metadata":
                     data = event["data"]
@@ -125,6 +134,21 @@ def render() -> None:
             st.error(f"流式问答失败：{exc}")
 
 
+def _extract_provider(result) -> str | None:
+    """从 agent result 中提取本次请求的服务 LLM（llm_provider / llm_model）。"""
+    if not isinstance(result, dict):
+        return None
+    for candidate in (result, result.get("generated_sql"), result.get("review"), result.get("rag")):
+        if not isinstance(candidate, dict):
+            continue
+        metadata = candidate.get("metadata")
+        if isinstance(metadata, dict) and metadata.get("llm_provider"):
+            provider = metadata["llm_provider"]
+            model = metadata.get("llm_model", "")
+            return f"{provider}{f'（{model}）' if model else ''}"
+    return None
+
+
 def _extract_citations(result):
     if not isinstance(result, dict):
         return []
@@ -138,6 +162,9 @@ def _extract_citations(result):
 def _render_agent_result(result) -> None:
     if not isinstance(result, dict):
         return
+    provider = _extract_provider(result)
+    if provider:
+        st.caption(f"服务模型：{provider}")
     if "sql" in result:
         st.code(result.get("sql", ""), language="sql")
     generated_sql = result.get("generated_sql")

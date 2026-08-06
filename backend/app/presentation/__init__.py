@@ -1,1 +1,1 @@
-"""Presentation layer package."""
+"""表现层包。"""

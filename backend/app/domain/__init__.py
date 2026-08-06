@@ -1,1 +1,1 @@
-"""Domain model and port package."""
+"""领域模型与端口包。"""

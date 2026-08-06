@@ -23,6 +23,9 @@ from backend.app.core.constants import (
     DEFAULT_DEEPSEEK_TIMEOUT_SECONDS,
     DEFAULT_EMBEDDING_MODEL,
     DEFAULT_EMBEDDINGS_DIR,
+    DEFAULT_LOCAL_BASE_URL,
+    DEFAULT_LOCAL_CHAT_MODEL,
+    DEFAULT_LOCAL_TIMEOUT_SECONDS,
     DEFAULT_LOGS_DIR,
     DEFAULT_MODELS_DIR,
     DEFAULT_OLLAMA_BASE_URL,
@@ -43,6 +46,7 @@ from backend.app.core.constants import (
     PROVIDER_OLLAMA,
     PROVIDER_OPENAI,
 )
+from backend.app.domain.ports.llm_provider import TaskType
 
 
 class Environment(StrEnum):
@@ -119,6 +123,9 @@ class LLMSettings(BaseModel):
     request_timeout_seconds: int = Field(default=60, ge=1, le=600)
     max_retries: int = Field(default=2, ge=0, le=10)
     streaming_enabled: bool = True
+    routing_enabled: bool = False
+    cloud_provider: ProviderName | None = None
+    routing_fallback_to_cloud: bool = True
 
 
 class EmbeddingSettings(BaseModel):
@@ -159,6 +166,24 @@ class OllamaSettings(BaseModel):
     chat_model: str = DEFAULT_OLLAMA_CHAT_MODEL
     timeout_seconds: int = Field(default=DEFAULT_OLLAMA_TIMEOUT_SECONDS, ge=1, le=600)
     keep_alive: str = "5m"
+
+
+class LocalModelSettings(BaseModel):
+    """本地微调模型（Ollama OpenAI 兼容接口）配置。"""
+
+    model_config = ConfigDict(validate_default=True)
+
+    enabled: bool = False
+    base_url: AnyHttpUrl = DEFAULT_LOCAL_BASE_URL
+    chat_model: str = DEFAULT_LOCAL_CHAT_MODEL
+    api_key: SecretStr | None = None
+    timeout_seconds: int = Field(default=DEFAULT_LOCAL_TIMEOUT_SECONDS, ge=1, le=600)
+    max_retries: int = Field(default=1, ge=0, le=10)
+    routing_tasks: tuple[str, ...] = (
+        TaskType.TEXT2SQL.value,
+        TaskType.SQL_REVIEW.value,
+        TaskType.WAREHOUSE_DESIGN.value,
+    )
 
 
 class RuntimeSettings(BaseModel):
@@ -224,6 +249,7 @@ class Settings(BaseSettings):
     deepseek: DeepSeekSettings = Field(default_factory=DeepSeekSettings)
     openai: OpenAISettings = Field(default_factory=OpenAISettings)
     ollama: OllamaSettings = Field(default_factory=OllamaSettings)
+    local: LocalModelSettings = Field(default_factory=LocalModelSettings)
     deepseek_api_key: SecretStr | None = Field(
         default=None,
         validation_alias="DEEPSEEK_API_KEY",
@@ -259,7 +285,7 @@ class Settings(BaseSettings):
     @classmethod
     def default_debug_by_environment(cls, value: Any, info: ValidationInfo) -> bool:
         if value is not None:
-            return bool(value)
+            return value
         environment = info.data.get("environment", Environment.DEVELOPMENT)
         return environment is not Environment.PRODUCTION
 

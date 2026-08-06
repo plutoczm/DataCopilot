@@ -14,8 +14,8 @@ router = APIRouter(prefix="/api/v1/text2sql", tags=["Text2SQL"])
 @router.post(
     "",
     response_model=Text2SQLResponse,
-    summary="Generate SQL from natural language",
-    description="Generate validated SQL for MySQL, Hive, Spark SQL, or ClickHouse.",
+    summary="根据自然语言生成 SQL",
+    description="为 MySQL、Hive、Spark SQL 或 ClickHouse 生成经过校验的 SQL。",
 )
 async def generate_text2sql(
     request: Text2SQLRequest,

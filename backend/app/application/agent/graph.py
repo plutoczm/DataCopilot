@@ -1,3 +1,4 @@
+import re
 import time
 from collections.abc import AsyncIterator
 from typing import Any
@@ -10,9 +11,11 @@ from backend.app.application.agent.models import (
     AgentRequest,
     AgentResponse,
 )
+from backend.app.application.agent.memory import ConversationMemory
 from backend.app.application.agent.nodes import AgentNodes
 from backend.app.application.agent.router import IntentRouter
 from backend.app.application.agent.state import AgentState
+from backend.app.application.agent.tools import AgentToolbox
 from backend.app.application.rag.rag_service import RAGService
 from backend.app.application.sql_review.sql_review_service import SQLReviewService
 from backend.app.application.text2sql.text2sql_service import Text2SQLService
@@ -31,8 +34,16 @@ class AgentGraph:
         warehouse_design_service: WarehouseDesignService,
         llm_provider: LLMProvider,
         intent_router: IntentRouter | None = None,
+        memory: ConversationMemory | None = None,
+        max_steps: int = 8,
     ) -> None:
         self.intent_router = intent_router or IntentRouter()
+        self.toolbox = AgentToolbox(
+            rag_service=rag_service,
+            text2sql_service=text2sql_service,
+            sql_review_service=sql_review_service,
+            warehouse_design_service=warehouse_design_service,
+        )
         self.nodes = AgentNodes(
             intent_router=self.intent_router,
             rag_service=rag_service,
@@ -40,15 +51,28 @@ class AgentGraph:
             sql_review_service=sql_review_service,
             warehouse_design_service=warehouse_design_service,
             llm_provider=llm_provider,
+            toolbox=self.toolbox,
         )
+        self.memory = memory or ConversationMemory()
+        self.max_steps = max_steps
         self.logger = get_logger("datacopilot.agent")
         self._graph = self._build_graph()
 
     async def run(self, request: AgentRequest) -> AgentResponse:
         started_at = time.perf_counter()
+        memory_stats: dict[str, int | bool] = {}
+        if request.session_id:
+            snapshot = self.memory.load(request.session_id)
+            request = request.model_copy(
+                update={"history": [*snapshot.messages, *request.history]}
+            )
+            memory_stats = self.memory.stats(request.session_id)
         initial_state = self._initial_state(request)
         try:
-            state = await self._graph.ainvoke(initial_state)
+            state = await self._graph.ainvoke(
+                initial_state,
+                config={"recursion_limit": self.max_steps},
+            )
         except Exception as exc:
             elapsed_ms = round((time.perf_counter() - started_at) * 1000, 3)
             self.logger.exception(
@@ -75,8 +99,16 @@ class AgentGraph:
                 "execution_time_ms": elapsed_ms,
                 "tool_usage": state["tool_usage"],
                 "errors": state["errors"],
+                "max_steps": self.max_steps,
+                "memory": memory_stats,
+                "validation": state.get("validation", {}).get("summary", {}),
             },
         )
+        if request.session_id:
+            self.memory.append_turn(
+                request.session_id, request.message, response.final_response
+            )
+            response.metadata["memory"] = self.memory.stats(request.session_id)
         self.logger.info(
             "Agent workflow completed",
             extra={
@@ -99,7 +131,8 @@ class AgentGraph:
                 "metadata": response.metadata,
             },
         }
-        yield {"event": "token", "data": {"text": response.final_response}}
+        for chunk in self._stream_chunks(response.final_response):
+            yield {"event": "token", "data": {"text": chunk}}
         yield {
             "event": "result",
             "data": {
@@ -110,6 +143,27 @@ class AgentGraph:
         }
         yield {"event": "done", "data": {"status": "complete"}}
 
+    def tool_catalog(self) -> list[dict[str, Any]]:
+        return self.toolbox.catalog()
+
+    def clear_memory(self, session_id: str) -> bool:
+        return self.memory.clear(session_id)
+
+    def _stream_chunks(self, text: str, *, target_size: int = 48) -> list[str]:
+        parts = re.findall(r"\S+\s*|\s+", text)
+        if not parts:
+            return [text]
+        chunks: list[str] = []
+        current = ""
+        for part in parts:
+            current += part
+            if len(current) >= target_size:
+                chunks.append(current)
+                current = ""
+        if current:
+            chunks.append(current)
+        return chunks
+
     def _build_graph(self):
         graph = StateGraph(AgentState)
         graph.add_node("classify_intent", self.nodes.classify_intent)
@@ -119,6 +173,7 @@ class AgentGraph:
         graph.add_node("warehouse_design", self.nodes.warehouse_design)
         graph.add_node("general_chat", self.nodes.general_chat)
         graph.add_node("unknown", self.nodes.unknown)
+        graph.add_node("validate_result", self.nodes.validate_result)
         graph.add_node("format_response", self.nodes.format_response)
 
         graph.set_entry_point("classify_intent")
@@ -139,11 +194,12 @@ class AgentGraph:
             self._route_after_text2sql,
             {
                 "sql_review": "sql_review",
-                "format_response": "format_response",
+                "validate_result": "validate_result",
             },
         )
         for node_name in ("rag", "sql_review", "warehouse_design", "general_chat", "unknown"):
-            graph.add_edge(node_name, "format_response")
+            graph.add_edge(node_name, "validate_result")
+        graph.add_edge("validate_result", "format_response")
         graph.add_edge("format_response", END)
         return graph.compile()
 
@@ -167,4 +223,5 @@ class AgentGraph:
             "token_usage": LLMUsage(),
             "tool_usage": {},
             "errors": [],
+            "validation": {},
         }

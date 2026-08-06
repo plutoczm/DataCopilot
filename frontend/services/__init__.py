@@ -1,1 +1,1 @@
-"""Frontend API service clients."""
+"""前端 API 服务客户端。"""

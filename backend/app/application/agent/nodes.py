@@ -4,6 +4,8 @@ from typing import Any
 from backend.app.application.agent.models import AgentIntent
 from backend.app.application.agent.router import IntentRouter
 from backend.app.application.agent.state import AgentState
+from backend.app.application.agent.tools import AgentToolbox
+from backend.app.application.agent.validation import ResultValidator
 from backend.app.application.rag.rag_service import RAGService
 from backend.app.application.sql_review.sql_review_service import SQLReviewService
 from backend.app.application.text2sql.text2sql_service import Text2SQLService
@@ -21,6 +23,8 @@ class AgentNodes:
         sql_review_service: SQLReviewService,
         warehouse_design_service: WarehouseDesignService,
         llm_provider: LLMProvider,
+        toolbox: AgentToolbox | None = None,
+        result_validator: ResultValidator | None = None,
     ) -> None:
         self.intent_router = intent_router
         self.rag_service = rag_service
@@ -28,6 +32,13 @@ class AgentNodes:
         self.sql_review_service = sql_review_service
         self.warehouse_design_service = warehouse_design_service
         self.llm_provider = llm_provider
+        self.result_validator = result_validator or ResultValidator()
+        self.toolbox = toolbox or AgentToolbox(
+            rag_service=rag_service,
+            text2sql_service=text2sql_service,
+            sql_review_service=sql_review_service,
+            warehouse_design_service=warehouse_design_service,
+        )
 
     async def classify_intent(self, state: AgentState) -> dict[str, Any]:
         classification = self.intent_router.classify(state["query"])
@@ -40,12 +51,16 @@ class AgentNodes:
 
     async def rag(self, state: AgentState) -> dict[str, Any]:
         request = state["request"]
-        response = await self.rag_service.answer(
-            state["query"],
-            collection_name=request.collection_name,
-            top_k=request.top_k,
-            metadata_filter=request.metadata_filter,
-            score_threshold=request.score_threshold,
+        response = await self.toolbox.invoke(
+            "rag",
+            {
+                "question": state["query"],
+                "collection_name": request.collection_name,
+                "top_k": request.top_k,
+                "metadata_filter": request.metadata_filter,
+                "score_threshold": request.score_threshold,
+                "retrieval_mode": request.retrieval_mode,
+            },
         )
         return {
             "retrieved_context": response,
@@ -56,13 +71,16 @@ class AgentNodes:
 
     async def text2sql(self, state: AgentState) -> dict[str, Any]:
         request = state["request"]
-        response = await self.text2sql_service.generate(
-            question=state["query"],
-            engine=request.engine,
-            schema_context=request.schema_context,
-            database_name=request.database_name,
-            use_rag=request.use_rag,
-            rag_collection_name=request.rag_collection_name,
+        response = await self.toolbox.invoke(
+            "text2sql",
+            {
+                "question": state["query"],
+                "engine": request.engine,
+                "schema_context": request.schema_context,
+                "database_name": request.database_name,
+                "use_rag": request.use_rag,
+                "rag_collection_name": request.rag_collection_name,
+            },
         )
         return {
             "generated_sql": response,
@@ -74,10 +92,13 @@ class AgentNodes:
     async def sql_review(self, state: AgentState) -> dict[str, Any]:
         request = state["request"]
         sql = self._extract_sql(state)
-        response = await self.sql_review_service.review(
-            sql=sql,
-            engine=request.engine,
-            include_llm_explanation=True,
+        response = await self.toolbox.invoke(
+            "sql_review",
+            {
+                "sql": sql,
+                "engine": request.engine,
+                "include_llm_explanation": True,
+            },
         )
         return {
             "review_result": response,
@@ -88,10 +109,13 @@ class AgentNodes:
 
     async def warehouse_design(self, state: AgentState) -> dict[str, Any]:
         request = state["request"]
-        response = await self.warehouse_design_service.design(
-            requirement=state["query"],
-            use_rag=request.use_rag,
-            rag_collection_name=request.rag_collection_name,
+        response = await self.toolbox.invoke(
+            "warehouse_design",
+            {
+                "requirement": state["query"],
+                "use_rag": request.use_rag,
+                "rag_collection_name": request.rag_collection_name,
+            },
         )
         return {
             "warehouse_design": response,
@@ -122,6 +146,10 @@ class AgentNodes:
             ),
             "routing_path": state["routing_path"] + ["unknown"],
         }
+
+    async def validate_result(self, state: AgentState) -> dict[str, Any]:
+        validation = self.result_validator.validate(state)
+        return {"validation": validation.model_dump(mode="json")}
 
     async def format_response(self, state: AgentState) -> dict[str, Any]:
         intent = state["intent"]
@@ -164,10 +192,14 @@ class AgentNodes:
             answer = state.get("general_answer", "")
             result = {"answer": answer}
             final_response = answer
+        validation = state.get("validation", {})
+        if validation and "validation" not in result:
+            result["validation"] = validation
         return {
             "result": result,
             "final_response": final_response,
             "routing_path": state["routing_path"] + ["format_response"],
+            "validation": validation,
         }
 
     def _extract_sql(self, state: AgentState) -> str:

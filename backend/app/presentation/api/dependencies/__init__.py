@@ -1,1 +1,1 @@
-"""FastAPI dependency providers."""
+"""FastAPI 依赖提供器。"""

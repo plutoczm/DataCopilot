@@ -1,85 +1,26 @@
-# Configuration System Implementation Plan
+# 配置系统实施计划（历史记录）
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> 本计划已完成，仅用于追溯早期设计过程。
 
-**Goal:** Add a strongly typed `pydantic-settings` configuration system for DataPilot-AI with environment separation, project-root path defaults, provider configuration, validation, and unit tests.
+## 目标
 
-**Architecture:** Configuration lives in `backend/app/core` and exposes typed settings models plus cached loading helpers. Paths default to `/mnt/ext-disk/czm2025/Projects/DataCopilot` and are validated to stay under that root. Provider configuration is included for DeepSeek now and OpenAI/Ollama later without binding business logic to any provider.
+使用 Pydantic Settings 建立类型安全、可分环境覆盖且不会泄露密钥的配置系统。
 
-**Tech Stack:** Python 3.12, pydantic v2, pydantic-settings, pytest.
+### 任务 1：配置契约测试
 
----
+- 验证开发、测试和生产环境枚举。
+- 验证相对路径解析到项目目录内。
+- 验证 CPU/GPU 互斥和生产环境安全设置。
+- 验证环境变量嵌套覆盖与敏感字段隐藏。
 
-### Task 1: Settings Contract Tests
+### 任务 2：核心实现
 
-**Files:**
-- Create: `tests/core/test_settings.py`
+- 定义应用、路径、日志、大模型、Embedding 和运行时配置模型。
+- 支持 `.env.example`、`.env` 和系统环境变量。
+- 对路径、端口、超时、重试次数和日志级别设置校验。
 
-- [x] **Step 1: Write failing tests**
+### 验证
 
-Write tests for defaults, environment file precedence, project-local path validation, production safety validation, and cached settings helpers.
-
-- [x] **Step 2: Run test to verify it fails**
-
-Run: `.venv/bin/python -m pytest tests/core/test_settings.py -v`
-
-Expected: FAIL because `backend.app.core.settings` does not exist.
-
-### Task 2: Core Settings Implementation
-
-**Files:**
-- Create: `backend/app/core/constants.py`
-- Create: `backend/app/core/settings.py`
-- Create: `backend/app/core/config.py`
-- Create: `.env.example`
-- Create: `backend/requirements.txt`
-- Modify: `scripts/bootstrap_venv.sh`
-- Modify: `README.md`
-
-- [x] **Step 1: Add dependency metadata**
-
-Add `pydantic` and `pydantic-settings` to `backend/requirements.txt`, and teach the bootstrap script to install them.
-
-- [x] **Step 2: Implement constants**
-
-Define canonical project paths, environment values, provider names, and default provider URLs/models.
-
-- [x] **Step 3: Implement settings models**
-
-Create typed settings models with `SettingsConfigDict`, `.env.example` and `.env` loading, nested env delimiter, enum validation, path validation, and production safety checks.
-
-- [x] **Step 4: Implement config helpers**
-
-Expose `get_settings`, `load_settings`, and `clear_settings_cache`.
-
-- [x] **Step 5: Add environment example**
-
-Create `.env.example` with all supported keys and project-local path defaults.
-
-- [x] **Step 6: Update README**
-
-Document how to bootstrap and use the settings system.
-
-### Task 3: Verification
-
-**Files:**
-- Test: `tests/core/test_settings.py`
-- Test: `tests/test_project_skeleton.py`
-
-- [x] **Step 1: Run Module 2 tests**
-
-Run: `.venv/bin/python -m pytest tests/core/test_settings.py -v`
-
-Expected: PASS.
-
-- [x] **Step 2: Run full test suite**
-
-Run: `.venv/bin/python -m pytest -v`
-
-Expected: PASS.
-
-### Self-Review
-
-- Spec coverage: Covers pydantic-settings, development/test/production enum, `.env.example` and `.env` loading, project-root path defaults, DeepSeek/OpenAI/Ollama sections, strong typing, validation, required generated files, unit tests, and README update.
-- Placeholder scan: No TODO or TBD markers are present.
-- Type consistency: Tests import the same public names implemented in `settings.py` and `config.py`.
+- 运行配置单元测试和全量测试。
+- 检查 OpenAPI 不暴露 SecretStr。
+- 确认所有运行目录位于项目根目录内。

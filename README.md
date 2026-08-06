@@ -1,189 +1,159 @@
 # DataPilot-AI
 
-**AI Agent Platform for Data Engineering**
+面向数据工程场景的 AI 智能体平台。
 
-DataPilot-AI is a production-oriented AI agent platform for data engineering workflows. It combines knowledge-base RAG, Text2SQL, SQL review, warehouse design, and a LangGraph agent router behind a FastAPI backend and Streamlit UI.
+DataPilot-AI 将知识库 RAG、Text2SQL、SQL 审核、数仓设计和 LangGraph 智能体路由整合到同一个应用中，后端使用 FastAPI，前端使用 Streamlit，并支持 Docker 部署与本地模型。
 
-The project is designed for GitHub publication, resume presentation, interview demonstrations, Docker deployment, and future extension to Spark, Hive, ClickHouse, Kafka, Flink, local LLMs, and GPU inference.
+启停方式、Docker 部署和访问地址请参阅 [START.md](START.md)。
 
-## Architecture Overview
+## 系统架构
 
 ```mermaid
 flowchart LR
-    UI[Streamlit Frontend] --> API[FastAPI API Layer]
-    API --> Agent[LangGraph Agent Router]
-    Agent --> RAG[RAG Service]
-    Agent --> T2S[Text2SQL Service]
-    Agent --> Review[SQL Review Service]
-    Agent --> WH[Warehouse Designer]
-    RAG --> VS[VectorStore Port]
-    RAG --> LLM[LLMProvider Port]
+    UI[Streamlit 前端] --> API[FastAPI 接口层]
+    API --> Agent[LangGraph 智能体]
+    Agent --> RAG[RAG 服务]
+    Agent --> T2S[Text2SQL]
+    Agent --> Review[SQL 审核]
+    Agent --> WH[数仓设计]
+    RAG --> VS[向量库端口]
+    RAG --> LLM[大模型端口]
     T2S --> LLM
     Review --> LLM
     WH --> LLM
-    VS --> Chroma[ChromaDB Adapter]
-    LLM --> DeepSeek[DeepSeek Provider]
+    VS --> Chroma[ChromaDB]
+    LLM --> DeepSeek[DeepSeek]
+    LLM --> Ollama[Ollama 本地模型]
 ```
 
-The code follows Clean Architecture:
+项目采用整洁架构：
 
-- Presentation: FastAPI routes, Pydantic API schemas, Streamlit pages.
-- Application: RAG, Text2SQL, SQL Review, Warehouse Design, Agent graph.
-- Domain: entities and provider ports.
-- Infrastructure: ChromaDB, document loaders, embeddings, DeepSeek provider.
+- 表现层：FastAPI 路由、Pydantic 接口模型和 Streamlit 页面。
+- 应用层：RAG、Text2SQL、SQL 审核、数仓设计和智能体工作流。
+- 领域层：文档、分块实体以及大模型、向量库端口。
+- 基础设施层：ChromaDB、DeepSeek、Ollama、文档加载器和 Embedding 实现。
 
-## Features
+## 主要功能
 
-- Knowledge Base RAG for TXT, Markdown, PDF, and DOCX.
-- ChromaDB vector storage with metadata filtering and persistence.
-- DeepSeek async LLM provider with retries, timeouts, streaming, health checks, and usage tracking.
-- Text2SQL generation for Hive, Spark SQL, MySQL, and ClickHouse.
-- SQL review with risk scoring, rule checks, optimization suggestions, and LLM explanations.
-- Warehouse design generation for ODS, DWD, DWS, ADS, DIM, fact tables, DDL, and metrics.
-- LangGraph agent router for automatic intent classification and multi-step workflows.
-- Streamlit UI for agent chat, knowledge base, Text2SQL, SQL review, and warehouse design.
-- Docker Compose deployment with backend, frontend, ChromaDB, and optional Ollama profile.
-- Integration tests and coverage gate.
+- 支持 TXT、Markdown、PDF 和 DOCX 的知识库 RAG。
+- 使用 ChromaDB 持久化向量，支持元数据过滤。
+- 默认采用稠密向量 + BM25 混合召回、RRF 融合和轻量重排。
+- DeepSeek 异步调用，包含超时、有限重试、流式输出、健康检查和 Token 统计。
+- 可切换到 Ollama 本地模型。
+- 支持 Hive、Spark SQL、MySQL 和 ClickHouse 的 Text2SQL。
+- SQL 风险评分、规则检查、性能建议和大模型解释。
+- 生成 ODS、DWD、DWS、ADS、维度表、事实表、DDL 和指标定义。
+- LangGraph 自动意图识别和多步骤工作流，含 `validate_result` 结果校验节点。
+- LangChain 结构化工具与 Pydantic JSON Schema 参数校验。
+- 会话短期记忆、摘要压缩、最大执行步数和会话清理。
+- 多 LLM 智能路由：专业数据工程任务 → 本地微调模型，通用需求 → DeepSeek/OpenAI 云端，本地故障自动降级。
+- 模型微调子系统（`training/`）：基于公开数据集构建 3200+ 条数据工程 SFT 指令集，Unsloth 4-bit QLoRA 微调 Qwen3-8B，基座/微调对比评测，GGUF 导出与 Ollama 私有化部署。
+- 后端、前端、ChromaDB 和可选 Ollama 的 Docker Compose 部署。
+- 单元、接口、基础设施和集成测试。
 
-## Screenshots
+## 快速开始
 
-Place screenshots in `docs/assets/` before publishing:
+Windows 推荐直接使用：
 
-- `docs/assets/agent-chat.png`
-- `docs/assets/knowledge-base.png`
-- `docs/assets/text2sql.png`
-- `docs/assets/sql-review.png`
-- `docs/assets/warehouse-design.png`
-
-## Quick Start
-
-```bash
-scripts/bootstrap_venv.sh
-.venv/bin/pip install -r backend/requirements.txt -r frontend/requirements.txt -r requirements-dev.txt
-cp .env.example .env
+```bat
+start.cmd
 ```
 
-Set `DEEPSEEK_API_KEY` in `.env`, then start the backend:
+也可以使用 Conda 环境：
 
 ```bash
-.venv/bin/uvicorn backend.app.main:app --host 0.0.0.0 --port 8000
+conda env create -f environment.yml
+conda activate datacopilot
+python manage.py start --no-open
 ```
 
-Start the frontend:
+配置文件为 `.env`，可参考 `.env.example`。默认大模型为 DeepSeek，需要配置：
 
-```bash
-BACKEND_URL=http://localhost:8000 .venv/bin/streamlit run frontend/app.py --server.port 8501
+```text
+DEEPSEEK_API_KEY=你的密钥
 ```
 
-Open:
+启动后访问：
 
-- API docs: `http://localhost:8000/docs`
-- Streamlit UI: `http://localhost:8501`
+- 工作台：`http://127.0.0.1:8502`
+- API 文档：`http://127.0.0.1:8000/docs`
+- 健康检查：`http://127.0.0.1:8000/health`
 
-## Docker Deployment
+## Docker 部署
 
 ```bash
-docker compose --env-file docker/.env.production config
-docker compose --env-file docker/.env.production up -d
+docker compose --env-file docker/.env.production up -d --build
 docker compose --env-file docker/.env.production logs -f
 ```
 
-Optional Ollama profile:
+启用 Ollama：
 
 ```bash
-docker compose --env-file docker/.env.production --profile ollama up -d
+docker compose --profile ollama up -d ollama
+docker compose exec ollama ollama pull qwen3
 ```
 
-All runtime data is persisted under:
+然后设置 `LLM_PROVIDER=ollama`、`OLLAMA_ENABLED=true` 和 `OLLAMA_MODEL=qwen3` 后重新启动。运行数据统一保存在 `data/` 目录。
 
-```text
-./data
-```
-
-## Environment Variables
-
-Key variables:
+## 关键环境变量
 
 ```text
 DATACOPILOT_ENVIRONMENT=development|test|production
 DATACOPILOT_DEBUG=false
+DATACOPILOT_LLM__DEFAULT_PROVIDER=deepseek|ollama
+DATACOPILOT_LLM__ROUTING_ENABLED=false
+DATACOPILOT_LLM__CLOUD_PROVIDER=deepseek
 DEEPSEEK_API_KEY=
 DEEPSEEK_BASE_URL=https://api.deepseek.com/v1
 DEEPSEEK_MODEL=deepseek-chat
+DATACOPILOT_OLLAMA__BASE_URL=http://127.0.0.1:11434
+DATACOPILOT_OLLAMA__CHAT_MODEL=qwen3
+DATACOPILOT_LOCAL__ENABLED=false
+DATACOPILOT_LOCAL__BASE_URL=http://127.0.0.1:11434/v1
+DATACOPILOT_LOCAL__CHAT_MODEL=datacopilot-qwen3-8b
 BACKEND_URL=http://backend:8000
 ```
 
-Typed settings are loaded through `pydantic-settings` from `.env.example` and `.env`.
-
-## Project Structure
+## 项目结构
 
 ```text
 backend/app/
-  core/                 settings, constants, logging
-  domain/               entities and provider ports
-  application/          RAG, Text2SQL, SQL Review, Warehouse Design, Agent
-  infrastructure/       ChromaDB, DeepSeek, document loaders, embeddings
-  presentation/api/     FastAPI routes, schemas, dependencies
-frontend/
-  app.py
-  pages/
-  components/
-  services/
-tests/
-  unit, API, infrastructure, integration, deployment tests
-docker-compose.yml
-docker/.env.production
-docs/
+  core/                 配置、常量和日志
+  domain/               实体与端口
+  application/          RAG、Text2SQL、SQL 审核、数仓设计、智能体、评测
+  infrastructure/       ChromaDB、DeepSeek、Ollama、加载器、Embedding
+  presentation/api/     FastAPI 路由、模型和依赖
+frontend/               Streamlit 页面、组件和后端客户端
+tests/                  单元、接口、基础设施和集成测试
+docs/                   中文技术文档
 ```
 
-## Tech Stack
+## 技术栈
 
-- Python 3.12
-- FastAPI, Pydantic v2, pydantic-settings
-- LangGraph
-- ChromaDB
-- DeepSeek API via httpx
-- Streamlit
-- Docker Compose
-- pytest, pytest-cov
+- Python 3.11+
+- FastAPI、Pydantic v2、pydantic-settings
+- LangGraph、LangChain Core
+- ChromaDB、BGE-M3
+- DeepSeek、Ollama、httpx
+- Streamlit、Docker Compose
+- pytest、pytest-cov
 
-## Testing
-
-Run all tests:
+## 测试
 
 ```bash
-.venv/bin/python -m pytest -v
+python -m pytest -q
+python -m pytest --cov=backend --cov=frontend --cov-report=term-missing
 ```
 
-Run coverage:
+当前验证结果：`176 passed`。
 
-```bash
-.venv/bin/python -m pytest --cov=backend --cov=frontend --cov-report=term-missing --cov-fail-under=85
-```
+## 文档
 
-Latest verified result:
-
-```text
-111 passed
-Total coverage: 89.84%
-```
-
-## Future Plans
-
-- Spark SQL execution integration.
-- Hive metastore and lineage integration.
-- ClickHouse schema introspection and query optimization.
-- Kafka and Flink real-time data pipeline support.
-- Local LLM and Ollama provider switching.
-- GPU embedding and inference acceleration.
-- Evaluation dashboards for SQL quality, RAG quality, and agent routing.
-
-## Documentation
-
-- [Architecture](docs/ARCHITECTURE.md)
-- [Deployment](docs/DEPLOYMENT.md)
-- [API Reference](docs/API_REFERENCE.md)
-- [Interview Guide](docs/INTERVIEW_GUIDE.md)
-- [Roadmap](docs/ROADMAP.md)
-- [Changelog](docs/CHANGELOG.md)
-- [Release Checklist](RELEASE_CHECKLIST.md)
+- [技术栈说明](docs/AGENT_TECH_STACK.md)
+- [系统架构](docs/ARCHITECTURE.md)
+- [接口参考](docs/API_REFERENCE.md)
+- [部署指南](docs/DEPLOYMENT.md)
+- [面试讲解](docs/INTERVIEW_GUIDE.md)
+- [路线图](docs/ROADMAP.md)
+- [变更记录](docs/CHANGELOG.md)
+- [发布检查清单](RELEASE_CHECKLIST.md)

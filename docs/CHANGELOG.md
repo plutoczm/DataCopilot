@@ -1,94 +1,45 @@
-# Changelog
+# 变更记录
 
-## 0.1.0 - Module 1-15 Completion
+## 当前开发版本
 
-### Module 1: Project Skeleton
+### 智能体
 
-- Created backend, frontend, tests, docs, scripts, data, Docker, model, and knowledge-base directories.
-- Added project-local virtual environment bootstrap in the same style as Yolov26.
+- 使用 LangChain `StructuredTool` 注册 RAG、Text2SQL、SQL 审核和数仓设计工具。
+- 为所有工具增加 Pydantic JSON Schema 参数校验和工具目录接口。
+- 增加会话短期记忆、旧消息摘要压缩和会话清理。
+- 增加 LangGraph 最大执行步数，防止循环调用。
+- SSE 改为增量分片输出。
+- 新增 `validate_result` 结果校验节点：SQL 结构/引擎校验、SQL 审核结论与规则引擎一致性核对、数仓分层覆盖率与 DDL 检查、RAG 引用与回答检查，校验摘要透出到 `metadata.validation`。
 
-### Module 2: Configuration System
+### 多 LLM 智能路由
 
-- Added `pydantic-settings` configuration.
-- Supported `development`, `test`, and `production` environments.
-- Added typed DeepSeek, OpenAI, Ollama, path, runtime, and logging settings.
-- Validated all runtime paths under the project root.
+- 新增通用 OpenAI 兼容 Provider，同时服务 OpenAI 云端与 Ollama 本地 OpenAI 兼容接口。
+- 新增 `TaskBoundLLMProvider` + `RoutingLLMProvider`：专业数据工程任务（Text2SQL/SQL 审核/数仓设计）路由到本地微调模型，通用需求走云端，本地故障自动降级。
+- 新增 `LocalModelSettings` 与 `DATACOPILOT_LLM__ROUTING_*` 配置，默认关闭路由，行为与旧版本一致。
 
-### Module 3: Logging System
+### RAG 检索
 
-- Added structured JSON logging.
-- Added rotating file handler.
-- Added request ID and trace ID context.
-- Integrated FastAPI request tracing.
+- 新增纯向量与混合检索模式。
+- 混合检索使用稠密 ANN、BM25、RRF 融合和轻量词项重排。
+- 保留分数阈值、无召回拒答和引用来源。
+- 首次启动时幂等创建默认知识库集合。
 
-### Module 4: Knowledge Base RAG
+### 大模型与部署
 
-- Added document ingestion, chunking, retrieval, citation, and RAG services.
-- Added TXT, Markdown, PDF, and DOCX loaders.
-- Added embedding provider abstraction and BGE-M3 placeholder provider.
-- Added grounded RAG prompt and structured citation model.
+- 新增 Ollama Provider，可与 DeepSeek 通过环境变量切换。
+- Docker Compose 增加 Ollama Provider 配置。
+- 新增意图准确率、Precision@K、MRR 和工具成功率评测模型。
+- 完成说明文档、代码注释和 OpenAPI 文案中文化。
 
-### Module 5: ChromaDB Integration
+### 验证
 
-- Added vector store domain port.
-- Added ChromaDB adapter with collection CRUD, document CRUD, metadata filters, similarity search, scored search, pagination, and persistence.
-- Persisted vector data under `data/chromadb`.
+- 全量自动化测试：`176 passed`。
+- Python 编译、Docker Compose 配置和健康检查通过。
 
-### Module 6: DeepSeek Provider
+## 0.1.0
 
-- Added LLM provider domain port.
-- Added DeepSeek async HTTP implementation.
-- Supported chat, streaming, retries, timeouts, health checks, structured errors, usage tracking, and token counting.
-
-### Module 7: FastAPI Backend
-
-- Added FastAPI app, routes, schemas, dependencies, OpenAPI, global exception handlers, middleware, and health endpoints.
-- Added document upload/list/delete, knowledge query, RAG stream, runtime config, root endpoint, docs, and OpenAPI.
-
-### Module 8: Text2SQL
-
-- Added schema parser, prompt builder, SQL validator, Text2SQL service, API schema, and route.
-- Supported MySQL, Hive, Spark SQL, and ClickHouse.
-
-### Module 9: SQL Review
-
-- Added SQL parser, rule engine, SQL Review service, API schema, and route.
-- Added risk scoring, issues, optimization suggestions, and LLM explanation support.
-
-### Module 10: Log Analysis
-
-- Not implemented yet.
-
-### Module 11: Warehouse Designer
-
-- Added warehouse design models, prompt builder, design service, and API route.
-- Generated ODS, DWD, DWS, ADS, DIM, fact tables, relationships, DDL, metrics, data flow, and recommendations.
-
-### Module 12: LangGraph Agent Router
-
-- Added LangGraph agent graph, state, nodes, intent router, models, API schema, and routes.
-- Supported RAG, Text2SQL, SQL Review, Warehouse Design, General Chat, Unknown, and Text2SQL plus SQL Review chained workflow.
-- Updated Streamlit Chat into Agent Chat.
-
-### Module 13: Streamlit Frontend
-
-- Added frontend app, pages, components, API client, Dockerfile, and tests.
-- Supported Agent Chat, Knowledge Base, Text2SQL, SQL Review, and Warehouse Designer pages.
-
-### Module 14: Docker Compose Deployment
-
-- Added production `docker-compose.yml`.
-- Added `docker/.env.production`.
-- Added optimized backend and frontend Dockerfiles.
-- Added health checks, resource limits, bind mounts, optional Ollama profile, and deployment tests.
-
-### Module 15: Integration Tests
-
-- Added full integration test suite for RAG, Text2SQL, SQL Review, Warehouse Design, Agent Router, frontend/backend client integration, and frontend render smoke.
-- Added `pytest-cov` dev dependency.
-- Verified coverage above 85%.
-
-## Current Verification
-
-- Full test suite: `111 passed`.
-- Coverage: `89.84%`.
+- 建立项目骨架、配置系统和结构化日志。
+- 实现知识库 RAG、ChromaDB 和 DeepSeek Provider。
+- 实现 FastAPI、Text2SQL、SQL 审核和数仓设计。
+- 实现 LangGraph 路由、Streamlit 前端和 Docker Compose。
+- 建立单元、接口、基础设施、部署和集成测试。

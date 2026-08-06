@@ -1,1 +1,1 @@
-"""DataPilot-AI Streamlit frontend package."""
+"""DataPilot-AI Streamlit 前端包。"""

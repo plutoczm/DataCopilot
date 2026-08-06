@@ -27,6 +27,7 @@ class IntentClassification(BaseModel):
 
 class AgentRequest(BaseModel):
     message: str = Field(min_length=1)
+    session_id: str | None = Field(default=None, min_length=1, max_length=128)
     history: list[dict[str, str]] = Field(default_factory=list)
     collection_name: str = "knowledge_base"
     top_k: int = Field(default=5, ge=1, le=20)
@@ -37,6 +38,7 @@ class AgentRequest(BaseModel):
     database_name: str | None = None
     use_rag: bool = False
     rag_collection_name: str = "knowledge_base"
+    retrieval_mode: str = Field(default="hybrid", pattern="^(vector|hybrid)$")
 
     @field_validator("engine", mode="before")
     @classmethod

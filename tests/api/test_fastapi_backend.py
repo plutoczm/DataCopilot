@@ -320,4 +320,4 @@ def test_unhandled_errors_use_consistent_response_format() -> None:
     assert response.status_code == 500
     payload = response.json()
     assert payload["error"]["code"] == "internal_server_error"
-    assert payload["error"]["message"] == "Internal server error"
+    assert payload["error"]["message"] == "服务器内部错误"

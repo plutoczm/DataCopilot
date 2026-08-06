@@ -14,8 +14,8 @@ router = APIRouter(prefix="/api/v1/warehouse-design", tags=["Warehouse Design"])
 @router.post(
     "",
     response_model=WarehouseDesignResponse,
-    summary="Generate warehouse design",
-    description="Generate layered data warehouse design, Hive DDL, metrics, flow, and recommendations.",
+    summary="生成数仓设计",
+    description="生成分层数仓设计、Hive DDL、指标、数据流和建议。",
 )
 async def design_warehouse(
     request: WarehouseDesignRequest,
@@ -25,5 +25,6 @@ async def design_warehouse(
         requirement=request.requirement,
         use_rag=request.use_rag,
         rag_collection_name=request.rag_collection_name,
+        recommendation_language=request.recommendation_language,
     )
     return WarehouseDesignResponse(**result.model_dump())

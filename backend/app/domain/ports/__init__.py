@@ -1,1 +1,1 @@
-"""Domain ports used by application services."""
+"""应用服务使用的领域端口。"""

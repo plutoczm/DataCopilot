@@ -26,8 +26,8 @@ from backend.app.domain.ports.llm_provider import LLMProvider
 
 
 COMMON_COLUMNS = [
-    WarehouseColumn(name="dt", data_type="string", description="Partition date"),
-    WarehouseColumn(name="etl_time", data_type="timestamp", description="ETL processing time"),
+    WarehouseColumn(name="dt", data_type="string", description="分区日期"),
+    WarehouseColumn(name="etl_time", data_type="timestamp", description="ETL 处理时间"),
 ]
 
 
@@ -53,6 +53,7 @@ class WarehouseDesignService:
         requirement: str,
         use_rag: bool = False,
         rag_collection_name: str = "knowledge_base",
+        recommendation_language: str = "zh-CN",
     ) -> WarehouseDesignResult:
         rag_context = None
         rag_error: str | None = None
@@ -75,6 +76,7 @@ class WarehouseDesignService:
                     self.prompt_builder.build_messages(
                         requirement=requirement,
                         rag_context=rag_context,
+                        recommendation_language=recommendation_language,
                     ),
                     temperature=0.0,
                     max_tokens=3000,
@@ -86,7 +88,9 @@ class WarehouseDesignService:
             except Exception as exc:
                 llm_error = self._error_message(exc)
 
-        result = self._merge_with_template(requirement, llm_payload)
+        result = self._merge_with_template(
+            requirement, llm_payload, recommendation_language=recommendation_language
+        )
         if token_usage is not None:
             result.token_usage = token_usage
         result.metadata.update(
@@ -94,6 +98,7 @@ class WarehouseDesignService:
                 "rag_used": use_rag,
                 "rag_context": rag_context or "",
                 "llm_payload_used": bool(llm_payload),
+                "recommendation_language": recommendation_language,
             }
         )
         if rag_error is not None:
@@ -143,8 +148,12 @@ class WarehouseDesignService:
         self,
         requirement: str,
         payload: dict[str, Any],
+        *,
+        recommendation_language: str = "zh-CN",
     ) -> WarehouseDesignResult:
-        template = self.build_template_design(requirement)
+        template = self.build_template_design(
+            requirement, recommendation_language=recommendation_language
+        )
         source_tables = self._parse_tables(payload.get("source_tables"), TableLayer.SOURCE)
         metrics = self._parse_metrics(payload.get("metrics"))
         recommendations = self._parse_string_list(payload.get("recommendations"))
@@ -161,13 +170,15 @@ class WarehouseDesignService:
         return template
 
     @classmethod
-    def build_template_design(cls, requirement: str) -> WarehouseDesignResult:
+    def build_template_design(
+        cls, requirement: str, *, recommendation_language: str = "zh-CN"
+    ) -> WarehouseDesignResult:
         domain = cls._detect_domain(requirement)
         tables = cls._domain_tables(domain)
         metrics = cls._domain_metrics(domain)
         relationships = cls._relationships(tables)
         data_flow = cls._data_flow(tables)
-        recommendations = cls._recommendations(domain)
+        recommendations = cls._recommendations(domain, recommendation_language)
         result = WarehouseDesignResult(
             requirement=requirement,
             source_tables=tables["source"],
@@ -202,35 +213,35 @@ class WarehouseDesignService:
             entity = "ad"
             source_name = "ad_click_log"
             core_columns = [
-                WarehouseColumn(name="ad_id", data_type="bigint", description="Ad id"),
-                WarehouseColumn(name="campaign_id", data_type="bigint", description="Campaign id"),
-                WarehouseColumn(name="user_id", data_type="bigint", description="User id"),
-                WarehouseColumn(name="impression_cnt", data_type="bigint", description="Impressions"),
-                WarehouseColumn(name="click_cnt", data_type="bigint", description="Clicks"),
-                WarehouseColumn(name="cost_amount", data_type="decimal(18,2)", description="Ad cost"),
+                WarehouseColumn(name="ad_id", data_type="bigint", description="广告 ID"),
+                WarehouseColumn(name="campaign_id", data_type="bigint", description="广告活动 ID"),
+                WarehouseColumn(name="user_id", data_type="bigint", description="用户 ID"),
+                WarehouseColumn(name="impression_cnt", data_type="bigint", description="曝光次数"),
+                WarehouseColumn(name="click_cnt", data_type="bigint", description="点击次数"),
+                WarehouseColumn(name="cost_amount", data_type="decimal(18,2)", description="广告成本"),
             ]
             dim = cls._table("dim_campaign", TableLayer.DIM, "Campaign dimension", core_columns[:2])
         elif domain == "user_behavior":
             entity = "user_behavior"
             source_name = "app_event_log"
             core_columns = [
-                WarehouseColumn(name="event_id", data_type="string", description="Event id"),
-                WarehouseColumn(name="user_id", data_type="bigint", description="User id"),
-                WarehouseColumn(name="event_name", data_type="string", description="Event name"),
-                WarehouseColumn(name="event_time", data_type="timestamp", description="Event time"),
-                WarehouseColumn(name="session_id", data_type="string", description="Session id"),
+                WarehouseColumn(name="event_id", data_type="string", description="事件 ID"),
+                WarehouseColumn(name="user_id", data_type="bigint", description="用户 ID"),
+                WarehouseColumn(name="event_name", data_type="string", description="事件名称"),
+                WarehouseColumn(name="event_time", data_type="timestamp", description="事件时间"),
+                WarehouseColumn(name="session_id", data_type="string", description="会话 ID"),
             ]
             dim = cls._table("dim_user", TableLayer.DIM, "User dimension", core_columns[1:2])
         else:
             entity = "order"
             source_name = "mysql_order"
             core_columns = [
-                WarehouseColumn(name="order_id", data_type="bigint", description="Order id"),
-                WarehouseColumn(name="user_id", data_type="bigint", description="User id"),
-                WarehouseColumn(name="sku_id", data_type="bigint", description="SKU id"),
-                WarehouseColumn(name="pay_amount", data_type="decimal(18,2)", description="Paid amount"),
-                WarehouseColumn(name="order_time", data_type="timestamp", description="Order time"),
-                WarehouseColumn(name="province", data_type="string", description="Province"),
+                WarehouseColumn(name="order_id", data_type="bigint", description="订单 ID"),
+                WarehouseColumn(name="user_id", data_type="bigint", description="用户 ID"),
+                WarehouseColumn(name="sku_id", data_type="bigint", description="商品 SKU ID"),
+                WarehouseColumn(name="pay_amount", data_type="decimal(18,2)", description="支付金额"),
+                WarehouseColumn(name="order_time", data_type="timestamp", description="下单时间"),
+                WarehouseColumn(name="province", data_type="string", description="省份"),
             ]
             dim = cls._table("dim_user", TableLayer.DIM, "User dimension", core_columns[1:2])
 
@@ -364,28 +375,28 @@ class WarehouseDesignService:
                 target_table=ods,
                 relationship_type="ingestion",
                 join_keys=[],
-                description="Ingest source data into ODS with minimal transformation.",
+                description="将源数据以最少转换摄取到 ODS 层。",
             ),
             TableRelationship(
                 source_table=ods,
                 target_table=dwd,
                 relationship_type="cleaning",
                 join_keys=[],
-                description="Clean, deduplicate, and standardize ODS records into DWD detail.",
+                description="清洗、去重并标准化 ODS 记录，生成 DWD 明细。",
             ),
             TableRelationship(
                 source_table=dwd,
                 target_table=dws,
                 relationship_type="aggregation",
                 join_keys=["dt"],
-                description="Aggregate DWD detail into daily DWS summaries.",
+                description="将 DWD 明细聚合为 DWS 日汇总。",
             ),
             TableRelationship(
                 source_table=dws,
                 target_table=ads,
                 relationship_type="serving",
                 join_keys=["dt"],
-                description="Publish DWS summaries into ADS dashboard tables.",
+                description="将 DWS 汇总结果发布到 ADS 看板表。",
             ),
         ]
 
@@ -409,7 +420,21 @@ class WarehouseDesignService:
         )
 
     @classmethod
-    def _recommendations(cls, domain: str) -> list[str]:
+    def _recommendations(cls, domain: str, language: str = "zh-CN") -> list[str]:
+        if language == "zh-CN":
+            domain_names = {
+                "ecommerce": "电商",
+                "advertising": "广告投放",
+                "user_behavior": "用户行为",
+            }
+            return [
+                "分区策略：所有事实表和汇总表按 dt 字段分区。",
+                "分桶策略：大型事实表按 user_id 或核心业务主键分桶。",
+                "存储格式：Hive 表统一使用 Parquet 列式存储。",
+                "压缩策略：使用 Snappy，在 CPU 开销与读写效率之间取得平衡。",
+                "关联策略：广播小维度表，并对大型事实表进行预聚合。",
+                f"业务域策略：围绕{domain_names.get(domain, domain)}场景优化指标与维度设计。",
+            ]
         return [
             "Partition Strategy: partition all fact and summary tables by dt.",
             "Bucketing Strategy: bucket large fact tables by user_id or primary business key.",

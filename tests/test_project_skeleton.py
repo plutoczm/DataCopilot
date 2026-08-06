@@ -78,16 +78,14 @@ def test_development_scripts_use_project_local_runtime_paths() -> None:
     assert "backend-dev.pid" in stop_content
 
 
-def test_project_local_virtual_environment_matches_yolov26_style() -> None:
-    pyvenv_config = PROJECT_ROOT / ".venv" / "pyvenv.cfg"
+def test_project_defines_an_independent_conda_environment() -> None:
+    environment_file = PROJECT_ROOT / "environment.yml"
+    manager = PROJECT_ROOT / "manage.py"
 
-    assert pyvenv_config.is_file()
-
-    config_text = pyvenv_config.read_text(encoding="utf-8")
-
-    assert "version = 3.12.2" in config_text
-    assert "include-system-site-packages = false" in config_text
-    assert f"{PROJECT_ROOT}/.venv" in config_text
+    assert environment_file.is_file()
+    assert manager.is_file()
+    assert "name: datacopilot" in environment_file.read_text(encoding="utf-8")
+    assert 'ENV_NAME = "datacopilot"' in manager.read_text(encoding="utf-8")
 
 
 def test_runtime_storage_directories_stay_inside_project_root() -> None:

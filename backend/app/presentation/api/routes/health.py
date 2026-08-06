@@ -25,8 +25,8 @@ router = APIRouter(tags=["Health"])
 @router.get(
     "/",
     response_model=RootResponse,
-    summary="Service metadata",
-    description="Return service metadata and API documentation links.",
+    summary="服务元数据",
+    description="返回服务元数据和 API 文档链接。",
 )
 def root(settings: Settings = Depends(get_app_settings)) -> RootResponse:
     return RootResponse(
@@ -41,8 +41,8 @@ def root(settings: Settings = Depends(get_app_settings)) -> RootResponse:
 @router.get(
     "/health",
     response_model=HealthResponse,
-    summary="Service health",
-    description="Validate application, LLM provider, and vector store status.",
+    summary="服务健康状态",
+    description="检查应用、大模型提供方和向量库状态。",
 )
 async def health(
     settings: Settings = Depends(get_app_settings),

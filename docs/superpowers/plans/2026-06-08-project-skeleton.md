@@ -1,128 +1,31 @@
-# Project Skeleton Implementation Plan
+# 项目骨架实施计划（历史记录）
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> 本计划已完成，仅用于追溯早期设计过程。
 
-**Goal:** Create the DataPilot-AI repository skeleton under `/mnt/ext-disk/czm2025/Projects/DataCopilot` with stable backend, frontend, data, deployment, test, and documentation boundaries.
+## 目标
 
-**Architecture:** This module creates only structural contracts. Business code, configuration loading, logging, RAG, providers, APIs, UI pages, Docker runtime, and documentation content are implemented in later approved modules.
+建立后端、前端、测试、文档、数据目录和 Docker 文件的基础边界，为后续模块提供稳定结构。
 
-**Tech Stack:** Python 3.12 project layout, FastAPI-ready backend package structure, Streamlit-ready frontend package structure, pytest contract tests.
+### 任务 1：项目根目录契约
 
----
+- 创建 `backend/`、`frontend/`、`tests/`、`docs/`、`data/`、`models/` 和 `knowledge_base/`。
+- 添加 `.gitignore`、`.dockerignore`、依赖清单和项目说明。
+- 使用测试验证必要目录和文件存在。
 
-### Task 1: Project Root Contract
+### 任务 2：Python 包边界
 
-**Files:**
-- Create: `tests/test_project_skeleton.py`
-- Create: `.gitignore`
-- Create: `README.md`
-- Create directories listed in the approved architecture.
+- 建立表现层、应用层、领域层和基础设施层包。
+- 前端通过服务客户端访问后端，不直接依赖基础设施。
+- 保持模块可导入并通过基础冒烟测试。
 
-- [x] **Step 1: Write the failing test**
+### 任务 3：存储边界
 
-```python
-from pathlib import Path
+- 所有运行数据放在项目内 `data/`。
+- 缓存、日志、上传文件和模型不得写入用户目录。
+- 为需要保留的空目录添加 `.gitkeep`。
 
+### 验证
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
-
-
-def test_required_top_level_directories_exist() -> None:
-    required_directories = [
-        "backend",
-        "frontend",
-        "knowledge_base",
-        "data/chromadb",
-        "data/uploads",
-        "data/logs",
-        "data/cache",
-        "data/embeddings",
-        "data/temp",
-        "docker",
-        "docs",
-        "tests",
-        "scripts",
-        "models",
-    ]
-
-    missing = [
-        directory
-        for directory in required_directories
-        if not (PROJECT_ROOT / directory).is_dir()
-    ]
-
-    assert missing == []
-```
-
-- [x] **Step 2: Run test to verify it fails**
-
-Run: `pytest tests/test_project_skeleton.py -v`
-
-Expected: FAIL with missing skeleton directories.
-
-- [x] **Step 3: Write minimal implementation**
-
-Create the approved directories and lightweight marker files so empty runtime directories are preserved by git.
-
-- [x] **Step 4: Run test to verify it passes**
-
-Run: `pytest tests/test_project_skeleton.py -v`
-
-Expected: PASS.
-
-### Task 2: Python Package Boundaries
-
-**Files:**
-- Create: `backend/app/__init__.py`
-- Create: `backend/app/main.py`
-- Create: `backend/app/presentation/__init__.py`
-- Create: `backend/app/presentation/api/__init__.py`
-- Create: `backend/app/application/__init__.py`
-- Create: `backend/app/domain/__init__.py`
-- Create: `backend/app/infrastructure/__init__.py`
-- Create: `backend/app/core/__init__.py`
-- Create: `frontend/app.py`
-- Create: `frontend/pages/.gitkeep`
-- Create: `frontend/components/.gitkeep`
-- Create: `frontend/services/.gitkeep`
-
-- [x] **Step 1: Extend the skeleton test**
-
-Add assertions for backend and frontend package entrypoints.
-
-- [x] **Step 2: Run test to verify it fails**
-
-Run: `pytest tests/test_project_skeleton.py -v`
-
-Expected: FAIL with missing package files.
-
-- [x] **Step 3: Create package files**
-
-Create importable packages and minimal entrypoints without business behavior.
-
-- [x] **Step 4: Run test to verify it passes**
-
-Run: `pytest tests/test_project_skeleton.py -v`
-
-Expected: PASS.
-
-### Task 3: Storage Boundary Contract
-
-**Files:**
-- Modify: `tests/test_project_skeleton.py`
-
-- [x] **Step 1: Add runtime storage path assertions**
-
-Assert all required persistent runtime directories are descendants of the project root.
-
-- [x] **Step 2: Run test to verify it passes**
-
-Run: `pytest tests/test_project_skeleton.py -v`
-
-Expected: PASS.
-
-### Self-Review
-
-- Spec coverage: Module 1 covers root structure, backend/frontend package boundaries, runtime data directories, scripts/docs/docker placeholders, and no business implementation.
-- Placeholder scan: No TODO or TBD markers are present.
-- Type consistency: The only executable contract is a pytest module using `pathlib.Path`.
+- 运行项目骨架测试。
+- 检查 Git 状态，不提交缓存和密钥。
+- 人工确认目录命名和依赖方向。

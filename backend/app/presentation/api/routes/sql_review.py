@@ -16,8 +16,8 @@ router = APIRouter(prefix="/api/v1/sql-review", tags=["SQL Review"])
 @router.post(
     "",
     response_model=SQLReviewResponse,
-    summary="Review SQL quality and performance",
-    description="Analyze SQL risks, score quality, and return rule-based optimization guidance.",
+    summary="审核 SQL 质量与性能",
+    description="分析 SQL 风险、质量评分并返回基于规则的优化建议。",
 )
 async def review_sql(
     request: SQLReviewRequest,
@@ -34,8 +34,8 @@ async def review_sql(
 @router.post(
     "/generated",
     response_model=GeneratedSQLReviewResponse,
-    summary="Generate SQL and immediately review it",
-    description="Run Text2SQL and SQL Review in one workflow.",
+    summary="生成并立即审核 SQL",
+    description="在同一工作流中依次执行 Text2SQL 和 SQL 审核。",
 )
 async def review_generated_sql(
     request: GeneratedSQLReviewRequest,

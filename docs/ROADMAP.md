@@ -1,80 +1,56 @@
-# Roadmap
+# 项目路线图
 
-## Phase 1 Completed
+## 已完成
 
-DataPilot-AI now includes:
+- FastAPI 后端、Streamlit 前端和整洁架构分层。
+- TXT、Markdown、PDF、DOCX 文档摄取。
+- BGE-M3 Embedding、ChromaDB 持久化和元数据过滤。
+- 稠密向量 + BM25 混合召回、RRF 融合、重排和低分拒答。
+- DeepSeek 与 Ollama 大模型 Provider。
+- Text2SQL、SQL 审核和分层数仓设计。
+- LangGraph 意图路由、多步骤工作流和 LangChain 结构化工具。
+- 会话记忆、摘要压缩、最大步骤限制和 SSE 输出。
+- Agent 结果校验节点（`validate_result`）：SQL 结构/引擎校验、审核结论一致性核对、数仓分层覆盖率、RAG 引用校验。
+- 多 LLM 智能路由：专业数据工程任务 → 本地微调模型，通用需求 → 云端，失败自动降级。
+- OpenAI 兼容 Provider：统一 OpenAI 云端与 Ollama 本地 OpenAI 兼容接口。
+- Docker Compose、健康检查、资源限制和项目内持久化。
+- 单元、接口、基础设施、部署和集成测试。
 
-- Project skeleton and project-local virtual environment.
-- Strongly typed configuration system with environment separation.
-- Structured logging and request tracing.
-- DeepSeek LLM provider.
-- ChromaDB vector store adapter.
-- Knowledge Base RAG pipeline.
-- FastAPI backend.
-- Text2SQL service.
-- SQL Review service.
-- Warehouse Designer.
-- LangGraph Agent Router.
-- Streamlit frontend.
-- Docker Compose deployment.
-- Integration tests and coverage reporting.
+## 近期规划
 
-## Phase 2 Future
+### 数据平台集成
 
-### Spark Integration
+- 接入 Hive Metastore 和 Spark Catalog，自动获取真实表结构。
+- 接入 ClickHouse system 表和执行计划。
+- 支持 Spark、Hive 和 ClickHouse 只读查询沙箱。
+- 增加 SQL 血缘和影响分析。
 
-- Spark SQL execution connector.
-- Spark plan parser.
-- AQE and shuffle diagnostics.
-- Skew detection and optimization recommendations.
+### RAG 与评测
 
-### Hive Integration
+- 使用 Cross-Encoder 或大模型进行精排。
+- 引入 Qdrant 稀疏索引，支持 BGE-M3 原生稠密 + 稀疏检索。
+- 建立带标准答案、相关文档和失败样本的版本化评测集。
+- 增加答案忠实度、SQL 可执行率、P95 延迟和 Token 成本看板。
 
-- Hive metastore schema introspection.
-- Partition health checks.
-- Table lineage extraction.
-- Hive DDL generation and validation.
+### 模型微调与私有化部署
 
-### ClickHouse Integration
+- 基于公开数据集（Spider）转换 + 知识库/规则引擎补齐，构建 3200+ 条数据工程 SFT 指令集。
+- 基于 Unsloth 对 Qwen3-8B-Instruct 开展 4-bit QLoRA 微调，产出 LoRA 适配器。
+- 基座 vs 微调模型的标准化评测框架（Text2SQL 组件 F1、数仓设计结构覆盖）。
+- LoRA 合并、GGUF 量化导出与 Ollama 私有化部署，接入多 LLM 智能路由。
 
-- ClickHouse schema crawler.
-- Primary key and order key recommendations.
-- Query rewrite suggestions for `PREWHERE`, projections, and materialized views.
+### 平台能力
 
-### Kafka Integration
+- 用户认证、工作区和租户隔离。
+- 将短期记忆迁移到 Redis，长期偏好写入数据库。
+- 大文档异步摄取、任务队列和进度查询。
+- OpenTelemetry 调用链、集中日志、限流和审计。
 
-- Topic documentation assistant.
-- Consumer lag diagnostics.
-- Event schema registry integration.
-- Streaming data quality checks.
+## 中长期探索
 
-### Flink Integration
+- 多智能体主管模式，要求共享状态、无环拓扑、全局深度上限和明确终止条件。
+- Kafka/Flink 实时链路诊断助手。
+- GPU Embedding、实时向量索引与本地推理优化。
+- 人工审批、高风险操作确认和企业权限系统。
 
-- Flink SQL generation.
-- State and checkpoint troubleshooting.
-- Streaming job topology explanation.
-- Windowing and watermark design assistant.
-
-### Local LLM Support
-
-- Ollama provider implementation.
-- Local model routing.
-- Offline demo profile.
-- Privacy-focused enterprise deployment mode.
-
-### GPU Inference
-
-- GPU embedding generation.
-- Local reranking support.
-- Local LLM acceleration.
-- Batch ingestion optimization.
-
-## Phase 3 Ideas
-
-- Authentication and role-based access.
-- Workspace and tenant isolation.
-- Evaluation framework for RAG and agent routing.
-- WebSocket streaming.
-- Async background ingestion jobs.
-- CI Docker build and image publishing.
-- Hosted demo environment.
+规划内容不代表当前已实现能力，当前状态以 README、测试和发布记录为准。

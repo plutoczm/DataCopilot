@@ -4,7 +4,7 @@ from backend.app.application.agent.models import AgentIntent, IntentClassificati
 
 
 class IntentRouter:
-    """Rule-based intent router with deterministic behavior for production fallbacks."""
+    """基于规则的意图路由器，为生产降级提供确定性行为。"""
 
     SQL_REVIEW_PATTERNS = (
         "检查sql",
@@ -129,7 +129,7 @@ class IntentRouter:
     def route_after_text2sql(self, intent: AgentIntent) -> str:
         if intent is AgentIntent.TEXT2SQL_SQL_REVIEW:
             return "sql_review"
-        return "format_response"
+        return "validate_result"
 
     def _normalize(self, query: str) -> str:
         return re.sub(r"\s+", " ", query.strip().lower())

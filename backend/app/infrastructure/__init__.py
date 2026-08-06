@@ -1,1 +1,1 @@
-"""Infrastructure adapter package."""
+"""基础设施适配器包。"""

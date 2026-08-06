@@ -1,9 +1,15 @@
 from pathlib import Path
+from enum import StrEnum
 
 from pydantic import BaseModel, Field
 
 from backend.app.domain.entities.chunk import DocumentChunk
 from backend.app.domain.ports.llm_provider import LLMUsage
+
+
+class RetrievalMode(StrEnum):
+    VECTOR = "vector"
+    HYBRID = "hybrid"
 
 
 class LoadedDocument(BaseModel):
@@ -36,6 +42,9 @@ class IngestionResult(BaseModel):
 class RetrievedChunk(BaseModel):
     chunk: DocumentChunk
     score: float
+    dense_score: float = 0.0
+    lexical_score: float = 0.0
+    rerank_score: float = 0.0
 
 
 class Citation(BaseModel):

@@ -98,18 +98,25 @@ class BackendClient:
         collection_name: str = "knowledge_base",
         top_k: int = 5,
         use_rag: bool = False,
+        session_id: str | None = None,
+        retrieval_mode: str = "hybrid",
     ) -> dict[str, Any]:
+        payload = {
+            "message": message,
+            "engine": engine,
+            "schema_context": schema_context,
+            "collection_name": collection_name,
+            "top_k": top_k,
+            "use_rag": use_rag,
+        }
+        if session_id:
+            payload["session_id"] = session_id
+        if retrieval_mode != "hybrid":
+            payload["retrieval_mode"] = retrieval_mode
         return self._json(
             self.client.post(
                 "/api/v1/agent/chat",
-                json={
-                    "message": message,
-                    "engine": engine,
-                    "schema_context": schema_context,
-                    "collection_name": collection_name,
-                    "top_k": top_k,
-                    "use_rag": use_rag,
-                },
+                json=payload,
             )
         )
 
@@ -122,18 +129,25 @@ class BackendClient:
         collection_name: str = "knowledge_base",
         top_k: int = 5,
         use_rag: bool = False,
+        session_id: str | None = None,
+        retrieval_mode: str = "hybrid",
     ) -> Iterator[dict[str, Any]]:
+        payload = {
+            "message": message,
+            "engine": engine,
+            "schema_context": schema_context,
+            "collection_name": collection_name,
+            "top_k": top_k,
+            "use_rag": use_rag,
+        }
+        if session_id:
+            payload["session_id"] = session_id
+        if retrieval_mode != "hybrid":
+            payload["retrieval_mode"] = retrieval_mode
         with self.client.stream(
             "POST",
             "/api/v1/agent/chat/stream",
-            json={
-                "message": message,
-                "engine": engine,
-                "schema_context": schema_context,
-                "collection_name": collection_name,
-                "top_k": top_k,
-                "use_rag": use_rag,
-            },
+            json=payload,
         ) as response:
             response.raise_for_status()
             yield from self._parse_sse_lines(response.iter_lines())
@@ -181,11 +195,16 @@ class BackendClient:
         requirement: str,
         *,
         use_rag: bool = False,
+        recommendation_language: str = "zh-CN",
     ) -> dict[str, Any]:
         return self._json(
             self.client.post(
                 "/api/v1/warehouse-design",
-                json={"requirement": requirement, "use_rag": use_rag},
+                json={
+                    "requirement": requirement,
+                    "use_rag": use_rag,
+                    "recommendation_language": recommendation_language,
+                },
             )
         )
 
