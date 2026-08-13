@@ -36,11 +36,9 @@ class OpenAIProvider:
         self,
         config: Any,
         *,
-        provider_name: str = "openai",
         client: httpx.AsyncClient | None = None,
     ) -> None:
         self.config = config
-        self._provider_name = provider_name
         self.model = config.chat_model
         self.base_url = str(config.base_url).rstrip("/")
         self.max_retries = config.max_retries
@@ -120,7 +118,7 @@ class OpenAIProvider:
             reachable=True,
             model_available=True,
             model=self.model,
-            message=f"{self.provider_name()} provider is healthy",
+            message="OpenAI provider is healthy",
             latency_ms=round((time.perf_counter() - started_at) * 1000, 3),
         )
 
@@ -153,7 +151,7 @@ class OpenAIProvider:
             response_payload = response.json()
         except json.JSONDecodeError as exc:
             raise LLMProviderError(
-                f"Invalid {self.provider_name()} response: response body is not valid JSON",
+                "Invalid OpenAI response: response body is not valid JSON",
                 provider=self.provider_name(),
                 status_code=response.status_code,
             ) from exc
@@ -175,7 +173,7 @@ class OpenAIProvider:
                 event = json.loads(data)
             except json.JSONDecodeError as exc:
                 raise LLMProviderError(
-                    f"Invalid {self.provider_name()} stream response: event is not valid JSON",
+                    "Invalid OpenAI stream response: event is not valid JSON",
                     provider=self.provider_name(),
                     status_code=response.status_code,
                 ) from exc
@@ -217,7 +215,7 @@ class OpenAIProvider:
         if last_error is not None:
             raise last_error
         raise LLMProviderError(
-            f"{self.provider_name()} request failed",
+            "OpenAI request failed",
             provider=self.provider_name(),
         )
 
@@ -271,7 +269,7 @@ class OpenAIProvider:
         try:
             payload = response.json()
         except json.JSONDecodeError:
-            return f"{self.provider_name()} HTTP {response.status_code}"
+            return f"OpenAI HTTP {response.status_code}"
         error = payload.get("error")
         if isinstance(error, dict):
             message = error.get("message")
@@ -279,7 +277,7 @@ class OpenAIProvider:
                 return message
         if isinstance(error, str) and error:
             return error
-        return f"{self.provider_name()} HTTP {response.status_code}"
+        return f"OpenAI HTTP {response.status_code}"
 
     def _raise_for_error_payload(
         self,
@@ -311,7 +309,7 @@ class OpenAIProvider:
             )
         except (KeyError, IndexError, TypeError, ValidationError) as exc:
             raise LLMProviderError(
-                f"Invalid {self.provider_name()} response",
+                "Invalid OpenAI response",
                 provider=self.provider_name(),
             ) from exc
 
@@ -336,6 +334,6 @@ class OpenAIProvider:
             )
         except (KeyError, IndexError, TypeError, ValidationError) as exc:
             raise LLMProviderError(
-                f"Invalid {self.provider_name()} stream response",
+                "Invalid OpenAI stream response",
                 provider=self.provider_name(),
             ) from exc
