@@ -59,8 +59,6 @@ def success_payload(content: str = "hello") -> dict[str, Any]:
 
 def make_provider(
     handler: httpx.MockTransport | None = None,
-    *,
-    provider_name: str = "openai",
     **openai_overrides: Any,
 ) -> OpenAIProvider:
     transport = handler or httpx.MockTransport(
@@ -69,7 +67,6 @@ def make_provider(
     client = httpx.AsyncClient(transport=transport)
     return OpenAIProvider(
         config=make_settings(**openai_overrides).openai,
-        provider_name=provider_name,
         client=client,
     )
 
@@ -82,14 +79,6 @@ async def test_provider_name_and_token_count_are_available() -> None:
     assert provider.token_count(
         [LLMMessage(role="user", content="hello"), LLMMessage(role="assistant", content="ok")]
     ) == 2
-
-    await provider.aclose()
-
-
-async def test_provider_name_can_override_for_local_model() -> None:
-    provider = make_provider(provider_name="local")
-
-    assert provider.provider_name() == "local"
 
     await provider.aclose()
 
@@ -143,19 +132,6 @@ async def test_chat_omits_authorization_header_when_no_api_key() -> None:
 
     assert observed_authorization == ""
     assert response.content == "no key needed"
-
-    await provider.aclose()
-
-
-async def test_chat_accepts_task_type_kwarg_as_forward_compatible_extension() -> None:
-    provider = make_provider()
-
-    response = await provider.chat(
-        [LLMMessage(role="user", content="hello")],
-        task_type="text2sql",
-    )
-
-    assert response.content == "hello"
 
     await provider.aclose()
 
@@ -317,7 +293,7 @@ async def test_invalid_response_maps_to_provider_error() -> None:
         httpx.MockTransport(lambda request: json_response(200, {"choices": []}))
     )
 
-    with pytest.raises(LLMProviderError, match="Invalid openai response"):
+    with pytest.raises(LLMProviderError, match="Invalid OpenAI response"):
         await provider.chat([LLMMessage(role="user", content="hello")])
 
     await provider.aclose()
