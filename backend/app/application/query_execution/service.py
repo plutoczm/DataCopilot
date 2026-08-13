@@ -7,6 +7,7 @@ from backend.app.application.query_execution.exceptions import (
     QueryExecutionDisabledError,
     QueryExecutionError,
     QueryRejectedError,
+    SchemaDriftError,
 )
 from backend.app.application.query_execution.models import (
     DataSourceInfo,
@@ -66,6 +67,7 @@ class QueryExecutionService:
         sql: str,
         max_rows: int | None = None,
         actor: str = "anonymous",
+        expected_schema_fingerprint: str | None = None,
     ) -> QueryExecutionResult:
         query_id = str(uuid4())
         sql_hash = hashlib.sha256(sql.encode("utf-8")).hexdigest()
@@ -92,6 +94,25 @@ class QueryExecutionService:
                 status="datasource_not_found",
             )
             raise DataSourceNotFoundError(f"Unknown datasource '{datasource}'.")
+
+        if expected_schema_fingerprint:
+            current_snapshot = self.get_schema(datasource)
+            expected = expected_schema_fingerprint.lower()
+            current = current_snapshot.fingerprint.lower()
+            if current != expected:
+                self._audit(
+                    query_id=query_id,
+                    datasource=datasource,
+                    sql_hash=sql_hash,
+                    actor=actor,
+                    status="schema_drift",
+                    expected_schema_fingerprint=expected,
+                    current_schema_fingerprint=current,
+                )
+                raise SchemaDriftError(
+                    "Datasource schema changed after SQL generation. "
+                    "Regenerate and review the query before executing it."
+                )
 
         policy_result = self.policy.validate(sql)
         if not policy_result.allowed:
@@ -142,6 +163,7 @@ class QueryExecutionService:
             row_count=result.row_count,
             truncated=result.truncated,
             elapsed_ms=result.elapsed_ms,
+            schema_fingerprint=expected_schema_fingerprint,
         )
         return result
 
