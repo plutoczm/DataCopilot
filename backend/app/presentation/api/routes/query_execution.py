@@ -9,6 +9,7 @@ from backend.app.presentation.api.dependencies.security import (
 )
 from backend.app.presentation.api.schemas.query_execution import (
     DataSourceListResponse,
+    DataSourceSchemaResponse,
     QueryExecutionRequest,
     QueryExecutionResponse,
 )
@@ -20,8 +21,11 @@ router = APIRouter(prefix="/api/v1/query-execution", tags=["Query Execution"])
 @router.get(
     "/datasources",
     response_model=DataSourceListResponse,
-    summary="列出可用只读数据源",
-    description="只返回非敏感的数据源名称、类型和可用状态，不返回数据库文件路径或凭据。",
+    summary="列出已配置数据源",
+    description=(
+        "返回非敏感的数据源名称、类型和物理可用状态。execution_enabled 单独表示"
+        "服务端是否允许执行模型生成 SQL；即使执行关闭，Schema 元数据仍可用于 Text2SQL。"
+    ),
 )
 def list_datasources(
     service: QueryExecutionService = Depends(get_query_execution_service),
@@ -29,6 +33,30 @@ def list_datasources(
     return DataSourceListResponse(
         execution_enabled=service.enabled,
         datasources=service.list_datasources(),
+    )
+
+
+@router.get(
+    "/datasources/{datasource}/schema",
+    response_model=DataSourceSchemaResponse,
+    summary="读取数据源 Schema Snapshot",
+    description=(
+        "读取用于 Text2SQL 的非凭据 Schema 快照与 fingerprint。Schema 访问和 SQL 执行"
+        "使用不同权限边界；该接口不会开启任意 SQL 执行能力。"
+    ),
+)
+def get_datasource_schema(
+    datasource: str,
+    _: SecurityPrincipal = Depends(require_minimum_role(SecurityRole.READER)),
+    service: QueryExecutionService = Depends(get_query_execution_service),
+) -> DataSourceSchemaResponse:
+    snapshot = service.get_schema(datasource)
+    return DataSourceSchemaResponse(
+        datasource=snapshot.datasource,
+        engine=snapshot.engine,
+        schema_context=snapshot.schema_context,
+        table_count=snapshot.table_count,
+        fingerprint=snapshot.fingerprint,
     )
 
 
