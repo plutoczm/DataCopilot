@@ -51,6 +51,7 @@ class QueryExecutionService:
         datasource: str,
         sql: str,
         max_rows: int | None = None,
+        actor: str = "anonymous",
     ) -> QueryExecutionResult:
         query_id = str(uuid4())
         sql_hash = hashlib.sha256(sql.encode("utf-8")).hexdigest()
@@ -62,6 +63,7 @@ class QueryExecutionService:
                 query_id=query_id,
                 datasource=datasource,
                 sql_hash=sql_hash,
+                actor=actor,
                 status="disabled",
             )
             raise QueryExecutionDisabledError("Read-only query execution is disabled.")
@@ -72,6 +74,7 @@ class QueryExecutionService:
                 query_id=query_id,
                 datasource=datasource,
                 sql_hash=sql_hash,
+                actor=actor,
                 status="datasource_not_found",
             )
             raise DataSourceNotFoundError(f"Unknown datasource '{datasource}'.")
@@ -83,6 +86,7 @@ class QueryExecutionService:
                 query_id=query_id,
                 datasource=datasource,
                 sql_hash=sql_hash,
+                actor=actor,
                 status="rejected",
                 violations=violation_codes,
             )
@@ -101,6 +105,7 @@ class QueryExecutionService:
                 query_id=query_id,
                 datasource=datasource,
                 sql_hash=sql_hash,
+                actor=actor,
                 status="failed",
             )
             raise
@@ -118,6 +123,7 @@ class QueryExecutionService:
             query_id=query_id,
             datasource=datasource,
             sql_hash=sql_hash,
+            actor=actor,
             status="success",
             row_count=result.row_count,
             truncated=result.truncated,
@@ -131,6 +137,7 @@ class QueryExecutionService:
         query_id: str,
         datasource: str,
         sql_hash: str,
+        actor: str,
         status: str,
         **extra,
     ) -> None:
@@ -139,6 +146,7 @@ class QueryExecutionService:
             extra={
                 "event_type": "query_execution",
                 "query_id": query_id,
+                "actor": actor,
                 "datasource": datasource,
                 "sql_sha256": sql_hash,
                 "status": status,

@@ -160,11 +160,7 @@ class OllamaSettings(BaseModel):
 
 
 class QueryExecutionSettings(BaseModel):
-    """受治理的只读查询执行配置。
-
-    当前内置 SQLite 演示适配器，路径必须位于项目根目录内。生产接入 MySQL、
-    ClickHouse 等数据源时应使用独立只读账号和密钥管理，不复用此本地文件配置。
-    """
+    """受治理的只读查询执行配置。"""
 
     enabled: bool = False
     datasource_name: str = "retail_demo"
@@ -176,6 +172,50 @@ class QueryExecutionSettings(BaseModel):
     @classmethod
     def expand_sqlite_path(cls, value: Any) -> Path:
         return Path(value).expanduser()
+
+
+class SecuritySettings(BaseModel):
+    """Optional API-key authentication with a small role hierarchy.
+
+    Authentication stays disabled for local development compatibility. When enabled, an
+    admin key is mandatory; reader/analyst keys are optional because the admin key can
+    perform all operations. Keys are configuration secrets and must never be committed.
+    """
+
+    auth_enabled: bool = False
+    reader_api_key: SecretStr | None = None
+    analyst_api_key: SecretStr | None = None
+    admin_api_key: SecretStr | None = None
+
+    @field_validator(
+        "reader_api_key",
+        "analyst_api_key",
+        "admin_api_key",
+        mode="before",
+    )
+    @classmethod
+    def normalize_empty_secret(cls, value: Any) -> Any:
+        if isinstance(value, str) and not value.strip():
+            return None
+        return value
+
+    @model_validator(mode="after")
+    def validate_keys(self) -> Self:
+        configured: list[str] = []
+        for field_name in ("reader_api_key", "analyst_api_key", "admin_api_key"):
+            secret = getattr(self, field_name)
+            if secret is None:
+                continue
+            value = secret.get_secret_value().strip()
+            if len(value) < 16:
+                raise ValueError(f"security.{field_name} must be at least 16 characters")
+            configured.append(value)
+
+        if len(configured) != len(set(configured)):
+            raise ValueError("security API keys must be unique across roles")
+        if self.auth_enabled and self.admin_api_key is None:
+            raise ValueError("security.admin_api_key is required when auth is enabled")
+        return self
 
 
 class RuntimeSettings(BaseModel):
@@ -242,6 +282,7 @@ class Settings(BaseSettings):
     openai: OpenAISettings = Field(default_factory=OpenAISettings)
     ollama: OllamaSettings = Field(default_factory=OllamaSettings)
     query_execution: QueryExecutionSettings = Field(default_factory=QueryExecutionSettings)
+    security: SecuritySettings = Field(default_factory=SecuritySettings)
     deepseek_api_key: SecretStr | None = Field(
         default=None,
         validation_alias="DEEPSEEK_API_KEY",
@@ -338,6 +379,14 @@ class Settings(BaseSettings):
     def validate_environment_safety(self) -> Self:
         if self.environment is Environment.PRODUCTION and self.debug:
             raise ValueError("debug must be false in production")
+        if (
+            self.environment is Environment.PRODUCTION
+            and self.query_execution.enabled
+            and not self.security.auth_enabled
+        ):
+            raise ValueError(
+                "query execution requires API authentication in production"
+            )
         return self
 
 
