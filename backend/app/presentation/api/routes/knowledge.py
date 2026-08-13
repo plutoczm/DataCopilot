@@ -14,6 +14,10 @@ from backend.app.presentation.api.dependencies.providers import (
     get_document_ingestion_service,
     get_rag_service,
 )
+from backend.app.presentation.api.dependencies.security import (
+    SecurityRole,
+    require_minimum_role,
+)
 from backend.app.presentation.api.schemas.common import DeleteResponse
 from backend.app.presentation.api.schemas.knowledge import (
     DocumentListResponse,
@@ -33,6 +37,7 @@ router = APIRouter(prefix="/api/v1/knowledge", tags=["Knowledge Base"])
     status_code=status.HTTP_201_CREATED,
     summary="上传知识库文档",
     description="将 PDF、DOCX、TXT 或 Markdown 文档上传到知识库。",
+    dependencies=[Depends(require_minimum_role(SecurityRole.ANALYST))],
 )
 async def upload_document(
     file: UploadFile = File(...),
@@ -100,6 +105,7 @@ def list_documents(
     "/documents/{document_id}",
     response_model=DeleteResponse,
     summary="删除知识库文档",
+    dependencies=[Depends(require_minimum_role(SecurityRole.ANALYST))],
 )
 def delete_document(
     document_id: str,
