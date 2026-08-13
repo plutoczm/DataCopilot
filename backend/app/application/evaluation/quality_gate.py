@@ -49,10 +49,10 @@ def evaluate_benchmark_report(
 ) -> BenchmarkGateResult:
     """Evaluate absolute release floors and optional candidate-vs-baseline regressions.
 
-    A model-enabled evaluation job can persist candidate and accepted-baseline artifacts.
-    A separate CI/release job can then enforce both policies without model credentials.
-    Existing callers that only provide ``report`` and ``thresholds`` retain the original
-    absolute-threshold behavior.
+    Baseline comparison is only meaningful when both artifacts describe the same benchmark
+    contract. Known identity fields and case counts are therefore checked before metric
+    drift. Missing legacy metadata stays backward-compatible, while conflicting metadata
+    fails closed instead of comparing unrelated runs.
     """
 
     observed = _observed_metrics(report)
@@ -113,6 +113,7 @@ def evaluate_benchmark_report(
     if baseline_report is not None:
         baseline = _observed_metrics(baseline_report)
         tolerances = regression_tolerances or BenchmarkRegressionTolerances()
+        _check_baseline_compatibility(failures, report, baseline_report)
         _check_minimum_regression(
             failures,
             "generation_success_rate",
@@ -170,6 +171,7 @@ def _observed_metrics(report: dict[str, Any]) -> dict[str, float | int | None]:
     text2sql = _mapping(report.get("text2sql"))
     safety = _mapping(report.get("safety"))
     return {
+        "case_count": _optional_int(text2sql.get("case_count")),
         "generation_success_rate": _optional_float(
             text2sql.get("generation_success_rate")
         ),
@@ -188,6 +190,63 @@ def _observed_metrics(report: dict[str, Any]) -> dict[str, float | int | None]:
             safety.get("unsafe_rejection_rate")
         ),
     }
+
+
+def _check_baseline_compatibility(
+    failures: list[str],
+    candidate_report: dict[str, Any],
+    baseline_report: dict[str, Any],
+) -> None:
+    candidate_metadata = _mapping(candidate_report.get("metadata"))
+    baseline_metadata = _mapping(baseline_report.get("metadata"))
+    for field in (
+        "benchmark_version",
+        "benchmark_fingerprint",
+        "datasource",
+        "use_rag",
+        "schema_source",
+        "schema_drift_precondition",
+        "result_oracle",
+    ):
+        _check_equal_if_present(
+            failures,
+            f"metadata.{field}",
+            candidate_metadata.get(field),
+            baseline_metadata.get(field),
+        )
+
+    candidate_text2sql = _mapping(candidate_report.get("text2sql"))
+    baseline_text2sql = _mapping(baseline_report.get("text2sql"))
+    _check_equal_if_present(
+        failures,
+        "text2sql.case_count",
+        candidate_text2sql.get("case_count"),
+        baseline_text2sql.get("case_count"),
+    )
+
+    candidate_safety = _mapping(candidate_report.get("safety"))
+    baseline_safety = _mapping(baseline_report.get("safety"))
+    _check_equal_if_present(
+        failures,
+        "safety.case_count",
+        candidate_safety.get("case_count"),
+        baseline_safety.get("case_count"),
+    )
+
+
+def _check_equal_if_present(
+    failures: list[str],
+    name: str,
+    candidate: Any,
+    baseline: Any,
+) -> None:
+    if candidate is None or baseline is None:
+        return
+    if candidate != baseline:
+        failures.append(
+            f"benchmark compatibility mismatch for {name}: "
+            f"candidate={candidate!r}, baseline={baseline!r}"
+        )
 
 
 def _mapping(value: Any) -> dict[str, Any]:
