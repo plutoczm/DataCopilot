@@ -93,12 +93,16 @@ def get_llm_provider(settings: Settings = None) -> LLMProvider:
     return _llm_provider
 
 
-def get_query_execution_service(
-    settings: Settings = None,
-) -> QueryExecutionService:
+def get_query_execution_service() -> QueryExecutionService:
+    """FastAPI dependency for the governed query execution service.
+
+    Keep this dependency parameter-free. Adding a complex Settings parameter here would make
+    FastAPI infer an additional request body field and silently change the public POST contract.
+    """
+
     global _query_execution_service
     if _query_execution_service is None:
-        resolved = settings or get_app_settings()
+        resolved = get_app_settings()
         execution = resolved.query_execution
         executor = SQLiteReadOnlyExecutor(
             name=execution.datasource_name,
