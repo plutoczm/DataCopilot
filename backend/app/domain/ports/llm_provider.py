@@ -1,37 +1,7 @@
 from collections.abc import AsyncIterator, Sequence
-from contextlib import contextmanager
-from contextvars import ContextVar
-from enum import StrEnum
 from typing import Protocol
 
 from pydantic import BaseModel, Field
-
-
-class TaskType(StrEnum):
-    """业务任务类型，用于多 LLM 路由按任务分发 provider。"""
-
-    RAG = "rag"
-    TEXT2SQL = "text2sql"
-    SQL_REVIEW = "sql_review"
-    WAREHOUSE_DESIGN = "warehouse_design"
-    GENERAL_CHAT = "general_chat"
-
-
-_llm_task: ContextVar[str | None] = ContextVar("llm_task", default=None)
-
-
-@contextmanager
-def llm_task(task: TaskType | str):
-    """在调用上下文内标记当前业务任务，供 RoutingLLMProvider 读取。"""
-    token = _llm_task.set(TaskType(task).value)
-    try:
-        yield
-    finally:
-        _llm_task.reset(token)
-
-
-def current_task() -> str | None:
-    return _llm_task.get()
 
 
 class LLMMessage(BaseModel):
@@ -80,7 +50,6 @@ class LLMProvider(Protocol):
         *,
         temperature: float | None = None,
         max_tokens: int | None = None,
-        task_type: str | None = None,
     ) -> LLMResponse:
         raise NotImplementedError
 
@@ -90,7 +59,6 @@ class LLMProvider(Protocol):
         *,
         temperature: float | None = None,
         max_tokens: int | None = None,
-        task_type: str | None = None,
     ) -> AsyncIterator[LLMStreamChunk]:
         raise NotImplementedError
 
