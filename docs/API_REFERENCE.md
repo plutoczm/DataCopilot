@@ -2,7 +2,13 @@
 
 默认地址：`http://127.0.0.1:8000`。Swagger 位于 `/docs`，OpenAPI JSON 位于 `/openapi.json`。
 
-所有 JSON 请求使用 `Content-Type: application/json`。参数校验失败返回统一错误结构：
+除 `/health` 外，API 位于受保护 Router 下。开启鉴权后使用：
+
+```text
+X-API-Key: <reader|analyst|admin key>
+```
+
+参数校验失败返回统一错误结构：
 
 ```json
 {
@@ -14,15 +20,19 @@
 }
 ```
 
-## 健康与配置
+## 健康、身份与配置
 
 ### `GET /health`
 
 检查应用、LLM Provider 和向量库。
 
+### `GET /api/v1/auth/me`
+
+返回当前 principal、role 与鉴权状态，不返回 API key。
+
 ### `GET /api/v1/config/runtime`
 
-返回不含密钥的运行环境、默认 Provider、Embedding 模型和能力开关。`capabilities.read_only_query_execution` 表示只读执行能力是否在配置中启用。
+返回不含密钥的运行环境、默认 Provider、Embedding 模型和能力开关。
 
 ## 知识库
 
@@ -32,7 +42,7 @@
 
 ### `GET /api/v1/knowledge/documents`
 
-查看当前登记的已摄取文档。
+查看持久化 Registry 中的已摄取文档。
 
 ### `DELETE /api/v1/knowledge/documents/{document_id}`
 
@@ -40,30 +50,7 @@
 
 ### `POST /api/v1/knowledge/query`
 
-直接执行 RAG 查询。
-
-```bash
-curl -X POST http://127.0.0.1:8000/api/v1/knowledge/query \
-  -H "Content-Type: application/json" \
-  -d '{
-    "question": "Spark AQE 有什么作用？",
-    "collection_name": "knowledge_base",
-    "top_k": 5,
-    "retrieval_mode": "hybrid",
-    "score_threshold": 0.2
-  }'
-```
-
-关键参数：
-
-| 参数 | 类型 | 默认值 | 说明 |
-| --- | --- | --- | --- |
-| `question` | string | 必填 | 用户问题 |
-| `collection_name` | string | `knowledge_base` | 知识库集合 |
-| `top_k` | integer | `5` | 最终召回数量，范围 1-20 |
-| `retrieval_mode` | string | `hybrid` | `hybrid` 或 `vector` |
-| `metadata_filter` | object | `null` | ChromaDB 元数据过滤 |
-| `score_threshold` | number | `null` | 最低相关度 |
+执行 RAG 查询。支持 collection、top-k、hybrid/vector retrieval、metadata filter 和 score threshold。
 
 ## RAG 流式对话
 
@@ -79,7 +66,7 @@ curl -X POST http://127.0.0.1:8000/api/v1/knowledge/query \
 
 ### `POST /api/v1/agent/chat`
 
-自动路由 RAG、Text2SQL、SQL Review、数仓设计或通用对话。数据库 Query Execution **不属于 Agent Tool**，避免自主链路隐式触发数据库资源操作。
+自动路由 RAG、Text2SQL、SQL Review、数仓设计或通用对话。Query Execution **不属于 Agent Tool**，避免自主链路隐式访问数据库资源。
 
 ### `POST /api/v1/agent/chat/stream`
 
@@ -93,30 +80,47 @@ curl -X POST http://127.0.0.1:8000/api/v1/knowledge/query \
 
 ### `POST /api/v1/text2sql`
 
+推荐使用 **Datasource 模式**：
+
 ```bash
 curl -X POST http://127.0.0.1:8000/api/v1/text2sql \
   -H "Content-Type: application/json" \
+  -H "X-API-Key: $DATACOPILOT_API_KEY" \
   -d '{
     "question": "统计最近30天各区域GMV",
-    "engine": "sqlite",
-    "schema_context": "orders(order_id integer, customer_id integer, order_amount numeric, created_at timestamp)",
-    "use_rag": false
+    "datasource": "retail_demo",
+    "use_rag": true
   }'
 ```
 
-支持：`sqlite`、`mysql`、`hive`、`spark_sql`、`clickhouse`。
+服务端通过 `SchemaCatalog` 自动发现表结构并绑定数据源 SQL Engine。生成 metadata 包含：
 
-响应包含：
+- `schema_source=datasource`；
+- `datasource`；
+- `schema_fingerprint`；
+- `schema_table_count_discovered`。
 
-- `sql`；
-- `explanation`；
-- `optimization_suggestions`；
-- `confidence`；
-- `validation.is_valid / issues`；
-- `token_usage`；
-- provider/model 等 metadata。
+也可以使用手工 Schema：
 
-Text2SQL 只生成候选 SQL，不自动触发数据库执行。
+```json
+{
+  "question": "统计最近30天各区域GMV",
+  "engine": "hive",
+  "schema_context": "orders(order_id bigint, customer_id bigint, amount decimal(18,2), dt string)",
+  "use_rag": false
+}
+```
+
+约束：
+
+- `datasource` 与 `schema_context` 互斥；
+- Datasource 模式下引擎由数据源决定；若客户端额外提供不一致的 `engine`，请求会被拒绝；
+- 手工模式未指定 `engine` 时保持默认 Hive 行为；
+- Text2SQL 只生成和校验候选 SQL，不自动触发数据库执行。
+
+支持引擎：`sqlite`、`mysql`、`hive`、`spark_sql`、`clickhouse`。
+
+响应包含 SQL、解释、优化建议、confidence、validation、token usage 与 provenance metadata。
 
 ## SQL Review
 
@@ -126,25 +130,21 @@ Text2SQL 只生成候选 SQL，不自动触发数据库执行。
 
 ### `POST /api/v1/sql-review/generate-and-review`
 
-在单个接口中先 Text2SQL，再进行 SQL Review。
+在单个接口中先 Text2SQL，再执行 SQL Review。
 
-## 受治理只读查询执行
-
-该能力默认关闭：
-
-```text
-DATACOPILOT_QUERY_EXECUTION__ENABLED=false
-```
+## 数据源元数据与受治理只读执行
 
 ### `GET /api/v1/query-execution/datasources`
 
-返回**非敏感**的数据源元数据，不返回数据库路径或凭据。
+返回非敏感数据源元数据：名称、类型、物理可用状态，以及全局 `execution_enabled`。
+
+注意：`available=true` 表示数据源可访问，**不代表模型 SQL 已获准执行**。Schema discovery 与 execution feature flag 是两个不同边界。
 
 响应示例：
 
 ```json
 {
-  "execution_enabled": true,
+  "execution_enabled": false,
   "datasources": [
     {
       "name": "retail_demo",
@@ -156,13 +156,43 @@ DATACOPILOT_QUERY_EXECUTION__ENABLED=false
 }
 ```
 
+### `GET /api/v1/query-execution/datasources/{datasource}/schema`
+
+需要至少 `reader` 角色。该接口只读取用于 Text2SQL 的非凭据 Schema Snapshot，不开启任意 SQL 执行能力。
+
+```bash
+curl http://127.0.0.1:8000/api/v1/query-execution/datasources/retail_demo/schema \
+  -H "X-API-Key: $DATACOPILOT_API_KEY"
+```
+
+响应：
+
+```json
+{
+  "datasource": "retail_demo",
+  "engine": "sqlite",
+  "schema_context": "CREATE TABLE customers (...);\n\nCREATE TABLE orders (...);",
+  "table_count": 5,
+  "fingerprint": "<sha256>"
+}
+```
+
+Fingerprint 用于记录本次生成基于哪一版 Schema；它不是授权令牌，也不包含数据库凭据。
+
 ### `POST /api/v1/query-execution`
 
-显式执行一条受治理只读 SQL。
+需要至少 `analyst` 角色。执行能力默认关闭：
+
+```text
+DATACOPILOT_QUERY_EXECUTION__ENABLED=false
+```
+
+请求：
 
 ```bash
 curl -X POST http://127.0.0.1:8000/api/v1/query-execution \
   -H "Content-Type: application/json" \
+  -H "X-API-Key: $DATACOPILOT_API_KEY" \
   -d '{
     "datasource": "retail_demo",
     "sql": "SELECT order_id, order_amount FROM orders ORDER BY order_id LIMIT 20",
@@ -170,49 +200,27 @@ curl -X POST http://127.0.0.1:8000/api/v1/query-execution \
   }'
 ```
 
-请求字段：
+执行路径包含：
 
-| 字段 | 类型 | 说明 |
-| --- | --- | --- |
-| `datasource` | string | 配置中的白名单数据源名 |
-| `sql` | string | 单条 `SELECT/WITH` SQL |
-| `max_rows` | int/null | 客户端期望上限；最终仍受服务端 `MAX_ROWS` 限制 |
-
-执行前后会经过：
-
-1. feature flag；
+1. execution feature flag；
 2. datasource whitelist；
 3. `ReadOnlySQLPolicy`；
 4. SQLite `mode=ro` + `PRAGMA query_only=ON`；
-5. timeout/deadline；
+5. progress-handler deadline；
 6. server row cap；
-7. query audit。
-
-响应示例：
-
-```json
-{
-  "query_id": "0a7353d7-...",
-  "datasource": "retail_demo",
-  "columns": ["order_id", "order_amount"],
-  "rows": [{"order_id": 101, "order_amount": 198.0}],
-  "row_count": 1,
-  "truncated": false,
-  "elapsed_ms": 0.82
-}
-```
-
-执行审计记录 SQL SHA-256，而不是把原始 SQL 或凭据塞进专用审计字段。
+7. Query ID / actor / datasource / SQL SHA-256 / status / latency audit。
 
 常见错误码：
 
 | HTTP | error.code | 场景 |
 | --- | --- | --- |
 | `400` | `query_rejected` | SQL 被只读策略拒绝 |
-| `404` | `datasource_not_found` | 数据源不在白名单 |
+| `401` | - | API key 缺失或无效 |
+| `403` | - | role 不满足接口要求 |
+| `404` | `datasource_not_found` | 数据源未配置 |
 | `408` | `query_timeout` | 查询超过 deadline |
 | `503` | `query_execution_disabled` | 执行能力未开启 |
-| `503` | `datasource_unavailable` | 配置的数据源不可用 |
+| `503` | `datasource_unavailable` | 数据源不可用 |
 
 ## 数仓设计
 
@@ -220,15 +228,39 @@ curl -X POST http://127.0.0.1:8000/api/v1/query-execution \
 
 响应包含 ODS、DWD、DWS、ADS、维度表、事实表、指标、关系、DDL、数据流和设计建议。
 
-## 评测 Runner
+## Text2SQL Benchmark Runner
 
-评测目前作为 repo 内 runner，而不是线上公共 API：
+评测作为仓库内 runner，不暴露为线上公共 API：
 
 ```bash
 python examples/retail_analytics/evaluate_text2sql.py
+python examples/retail_analytics/evaluate_text2sql.py --use-rag
 ```
 
-输出 `data/evaluation/retail_text2sql_report.json`，区分 generation、validation、execution、schema hallucination、latency、token 和 safety 指标。
+鉴权开启时：
+
+```bash
+DATACOPILOT_API_KEY=<analyst-key> python examples/retail_analytics/evaluate_text2sql.py
+```
+
+Runner 自身也使用 Datasource 模式，因此评测链路覆盖真实 Schema discovery，而不是另外维护一份只供 benchmark 使用的 Prompt 输入。
+
+每个零售 case 包含 `golden_sql`。Runner 会：
+
+1. 调用 Text2SQL；
+2. 校验生成 SQL；
+3. 在受治理数据源执行生成 SQL；
+4. 在同一数据源执行 Golden SQL；
+5. 比较结果集；
+6. 输出 `business_result_accuracy`。
+
+报告还区分 generation、validation、execution、table recall、schema hallucination、latency、token 与 safety 指标。`Execution Success` 不等于业务正确率。
+
+报告默认写入：
+
+```text
+data/evaluation/retail_text2sql_report.json
+```
 
 ## 通用状态码
 
@@ -237,6 +269,8 @@ python examples/retail_analytics/evaluate_text2sql.py
 | `200` | 成功 |
 | `201` | 文档创建成功 |
 | `400` | 业务规则/只读策略拒绝 |
+| `401` | 未认证 |
+| `403` | 权限不足 |
 | `404` | 资源或数据源不存在 |
 | `408` | 受治理查询超时 |
 | `422` | Pydantic 参数校验失败 |
