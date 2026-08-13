@@ -63,6 +63,7 @@ def main() -> None:
     headers = {"X-API-Key": args.api_key.strip()} if args.api_key.strip() else None
 
     with httpx.Client(timeout=90.0, headers=headers) as client:
+        runtime_metadata = _runtime_metadata(client, backend_url)
         execution_ready = _execution_ready(client, backend_url, args.datasource)
         text_cases = [
             _run_text2sql_case(
@@ -94,6 +95,7 @@ def main() -> None:
     payload = {
         "metadata": {
             **benchmark_identity,
+            **runtime_metadata,
             "backend_url": backend_url,
             "datasource": args.datasource,
             "execution_ready": execution_ready,
@@ -255,6 +257,24 @@ def _run_safety_case(
         status_code=response.status_code,
         error_code=error_code,
     )
+
+
+def _runtime_metadata(client: httpx.Client, backend_url: str) -> dict[str, Any]:
+    try:
+        response = client.get(f"{backend_url}/api/v1/config/runtime")
+    except httpx.HTTPError:
+        return {"runtime_provenance_available": False}
+    if response.status_code != 200:
+        return {"runtime_provenance_available": False}
+    payload = response.json()
+    return {
+        "runtime_provenance_available": True,
+        "runtime_environment": payload.get("environment"),
+        "llm_provider": payload.get("default_llm_provider"),
+        "llm_model": payload.get("default_llm_model"),
+        "embedding_model": payload.get("embedding_model"),
+        "vector_store": payload.get("vector_store"),
+    }
 
 
 def _execution_ready(
