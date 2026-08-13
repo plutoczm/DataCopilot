@@ -16,11 +16,11 @@ Python 依赖分别维护在：
 
 CI 会在安装后执行 `python -m pip check`，并运行 compile、Docker Compose config validation、pytest 与 coverage gate。
 
-## ChromaDB 说明
+## ChromaDB
 
-当前应用的 `ChromaDBVectorStore` 使用 `chromadb.PersistentClient(path=...)`，数据持久化在项目内 `data/chromadb/`。
+当前应用使用 `chromadb.PersistentClient`，持久化目录为项目内 `data/chromadb/`。Docker backend 将 `./data` 挂载到 `/app/data`，因此向量数据可以随项目数据目录持久化。
 
-`docker-compose.yml` 目前仍保留独立 ChromaDB Server 服务及 backend health dependency；它属于待收敛的历史部署拓扑，不应理解为当前 embedded vector-store 调用链的必需远程服务。后续应在删除该冗余服务或切换为真正的 HTTP client 两种方案中选择一种，避免同时维护两套拓扑。
+当前 Compose 是单 backend 实例拓扑，不再启动独立 ChromaDB 容器。部署结构与应用真实调用链保持一致，也避免为未使用的服务分配额外端口和资源。
 
 ## Legacy static web
 
