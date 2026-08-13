@@ -3,6 +3,12 @@ from backend.app.domain.ports.llm_provider import LLMMessage
 
 
 ENGINE_RULES: dict[SQLEngine, list[str]] = {
+    SQLEngine.SQLITE: [
+        "Use SQLite-compatible functions and syntax.",
+        "Use date('now', '-N day') or datetime('now', '-N day') for relative dates.",
+        "Use NULLIF for division-by-zero protection.",
+        "Use LIMIT for top-N queries.",
+    ],
     SQLEngine.MYSQL: [
         "Use MySQL LIMIT syntax.",
         "Use MySQL date functions such as DATE_SUB and CURRENT_DATE.",

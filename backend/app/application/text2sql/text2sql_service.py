@@ -16,6 +16,10 @@ from backend.app.domain.ports.llm_provider import LLMProvider
 
 
 DEFAULT_OPTIMIZATION_HINTS: dict[SQLEngine, list[str]] = {
+    SQLEngine.SQLITE: [
+        "Use indexes on join keys and selective filter columns.",
+        "Keep result sets bounded with LIMIT for exploratory queries.",
+    ],
     SQLEngine.MYSQL: [
         "Use indexes on join keys and high-selectivity filter columns.",
         "Check LIMIT with ORDER BY for top-N queries.",

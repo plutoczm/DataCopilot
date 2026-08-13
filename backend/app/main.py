@@ -7,6 +7,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
 from backend.app.application.agent.exceptions import AgentError
+from backend.app.application.query_execution.exceptions import QueryExecutionError
 from backend.app.core.constants import APP_VERSION
 from backend.app.core.config import get_settings
 from backend.app.core.logging_config import setup_fastapi_logging
@@ -29,6 +30,7 @@ def create_app() -> FastAPI:
                     "environment": settings.environment.value,
                     "api_only": settings.runtime.api_only,
                     "gpu_enabled": settings.runtime.gpu_enabled,
+                    "query_execution_enabled": settings.query_execution.enabled,
                 },
             )
         yield
@@ -50,6 +52,10 @@ def create_app() -> FastAPI:
             {"name": "Chat", "description": "流式对话接口。"},
             {"name": "Text2SQL", "description": "自然语言生成 SQL 接口。"},
             {"name": "SQL Review", "description": "SQL 质量、风险与优化审核接口。"},
+            {
+                "name": "Query Execution",
+                "description": "带只读策略、超时、行数限制和审计的查询执行接口。",
+            },
             {"name": "Warehouse Design", "description": "分层数仓设计生成接口。"},
             {"name": "Agent", "description": "统一 LangGraph 智能体路由接口。"},
         ],
@@ -97,6 +103,22 @@ def create_app() -> FastAPI:
             status_code=500,
             content=ErrorResponse(
                 error=ErrorDetail(code="vector_store_error", message=str(exc))
+            ).model_dump(mode="json"),
+        )
+
+    @app.exception_handler(QueryExecutionError)
+    async def query_execution_exception_handler(
+        request: Request,
+        exc: QueryExecutionError,
+    ) -> JSONResponse:
+        logger.warning(
+            "Query execution rejected or failed",
+            extra={"error_code": exc.code, "error": str(exc)},
+        )
+        return JSONResponse(
+            status_code=exc.status_code,
+            content=ErrorResponse(
+                error=ErrorDetail(code=exc.code, message=str(exc))
             ).model_dump(mode="json"),
         )
 

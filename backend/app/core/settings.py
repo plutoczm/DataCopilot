@@ -159,6 +159,25 @@ class OllamaSettings(BaseModel):
     keep_alive: str = "5m"
 
 
+class QueryExecutionSettings(BaseModel):
+    """受治理的只读查询执行配置。
+
+    当前内置 SQLite 演示适配器，路径必须位于项目根目录内。生产接入 MySQL、
+    ClickHouse 等数据源时应使用独立只读账号和密钥管理，不复用此本地文件配置。
+    """
+
+    enabled: bool = False
+    datasource_name: str = "retail_demo"
+    sqlite_path: Path = DEFAULT_DATA_DIR / "demo" / "retail_analytics.db"
+    max_rows: int = Field(default=200, ge=1, le=1000)
+    timeout_ms: int = Field(default=3000, ge=100, le=30000)
+
+    @field_validator("sqlite_path", mode="before")
+    @classmethod
+    def expand_sqlite_path(cls, value: Any) -> Path:
+        return Path(value).expanduser()
+
+
 class RuntimeSettings(BaseModel):
     api_only: bool = False
     gpu_enabled: bool = False
@@ -222,6 +241,7 @@ class Settings(BaseSettings):
     deepseek: DeepSeekSettings = Field(default_factory=DeepSeekSettings)
     openai: OpenAISettings = Field(default_factory=OpenAISettings)
     ollama: OllamaSettings = Field(default_factory=OllamaSettings)
+    query_execution: QueryExecutionSettings = Field(default_factory=QueryExecutionSettings)
     deepseek_api_key: SecretStr | None = Field(
         default=None,
         validation_alias="DEEPSEEK_API_KEY",
@@ -269,6 +289,23 @@ class Settings(BaseSettings):
             self.paths.project_root,
         )
         object.__setattr__(self, "logging", LoggingSettings(**logging_data))
+        return self
+
+    @model_validator(mode="after")
+    def resolve_query_execution_path_against_project_root(self) -> Self:
+        execution_data = self.query_execution.model_dump()
+        sqlite_path = _resolve_project_path(
+            self.query_execution.sqlite_path,
+            self.paths.project_root,
+        )
+        if not sqlite_path.is_relative_to(self.paths.project_root):
+            raise ValueError("query_execution.sqlite_path must stay inside project_root")
+        execution_data["sqlite_path"] = sqlite_path
+        object.__setattr__(
+            self,
+            "query_execution",
+            QueryExecutionSettings(**execution_data),
+        )
         return self
 
     @model_validator(mode="after")

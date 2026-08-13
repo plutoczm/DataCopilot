@@ -6,6 +6,7 @@ from backend.app.domain.ports.llm_provider import LLMUsage
 
 
 class SQLEngine(StrEnum):
+    SQLITE = "sqlite"
     MYSQL = "mysql"
     HIVE = "hive"
     SPARK_SQL = "spark_sql"

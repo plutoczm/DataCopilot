@@ -1,6 +1,7 @@
 from dataclasses import dataclass, field
 
 from backend.app.application.agent.graph import AgentGraph
+from backend.app.application.query_execution.service import QueryExecutionService
 from backend.app.application.rag.chunking_service import ChunkingService
 from backend.app.application.rag.citation_service import CitationService
 from backend.app.application.rag.document_ingestion_service import DocumentIngestionService
@@ -17,6 +18,7 @@ from backend.app.domain.ports.vector_store import VectorStore
 from backend.app.infrastructure.document_loaders import DocumentLoaderFactory
 from backend.app.infrastructure.embeddings import BGEM3EmbeddingProvider, EmbeddingProvider
 from backend.app.infrastructure.llm import DeepSeekProvider, OllamaProvider, OpenAIProvider
+from backend.app.infrastructure.query_execution import SQLiteReadOnlyExecutor
 from backend.app.infrastructure.vectorstore import ChromaDBVectorStore
 
 
@@ -41,6 +43,7 @@ _registry = DocumentRegistry()
 _vector_store: VectorStore | None = None
 _embedding_provider: EmbeddingProvider | None = None
 _llm_provider: LLMProvider | None = None
+_query_execution_service: QueryExecutionService | None = None
 _agent_graph: AgentGraph | None = None
 
 
@@ -84,10 +87,30 @@ def get_llm_provider(settings: Settings = None) -> LLMProvider:
         if resolved.llm.default_provider is ProviderName.OLLAMA:
             _llm_provider = OllamaProvider(resolved)
         elif resolved.llm.default_provider is ProviderName.OPENAI:
-            _llm_provider = OpenAIProvider(config=resolved.openai)
+            _llm_provider = OpenAIProvider(config=resolved.openai, provider_name="openai")
         else:
             _llm_provider = DeepSeekProvider(resolved)
     return _llm_provider
+
+
+def get_query_execution_service(
+    settings: Settings = None,
+) -> QueryExecutionService:
+    global _query_execution_service
+    if _query_execution_service is None:
+        resolved = settings or get_app_settings()
+        execution = resolved.query_execution
+        executor = SQLiteReadOnlyExecutor(
+            name=execution.datasource_name,
+            database_path=execution.sqlite_path,
+        )
+        _query_execution_service = QueryExecutionService(
+            executors={execution.datasource_name: executor},
+            enabled=execution.enabled,
+            max_rows=execution.max_rows,
+            timeout_ms=execution.timeout_ms,
+        )
+    return _query_execution_service
 
 
 def get_document_ingestion_service() -> DocumentIngestionService:

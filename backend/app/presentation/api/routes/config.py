@@ -28,5 +28,6 @@ def runtime_config(settings: Settings = Depends(get_app_settings)) -> RuntimeCon
             "streaming": settings.llm.streaming_enabled,
             "document_upload": True,
             "gpu_optional": True,
+            "read_only_query_execution": settings.query_execution.enabled,
         },
     )
