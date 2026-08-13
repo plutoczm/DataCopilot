@@ -3,8 +3,8 @@ import sqlite3
 from pathlib import Path
 
 import pytest
-from pydantic import ValidationError
 from fastapi.testclient import TestClient
+from pydantic import ValidationError
 
 from backend.app.application.query_execution.exceptions import (
     DataSourceNotFoundError,
@@ -58,6 +58,7 @@ def make_service(
     )
     return QueryExecutionService(
         executors={"retail_demo": executor},
+        schema_catalogs={"retail_demo": executor},
         enabled=enabled,
         max_rows=max_rows,
         timeout_ms=timeout_ms,
@@ -98,6 +99,29 @@ def test_read_only_policy_rejects_mutation_and_multiple_statements() -> None:
     assert policy.validate("WITH x AS (SELECT 1) DELETE FROM orders").allowed is False
     assert policy.validate("SELECT load_extension('x')").allowed is False
     assert policy.validate("-- DELETE\nSELECT 1").allowed is True
+
+
+def test_schema_discovery_is_available_even_when_execution_is_disabled(
+    tmp_path: Path,
+) -> None:
+    service = make_service(tmp_path, enabled=False)
+
+    datasource = service.list_datasources()[0]
+    assert datasource.available is True
+    assert service.enabled is False
+
+    first = service.get_schema("retail_demo")
+    second = service.get_schema("retail_demo")
+
+    assert first.datasource == "retail_demo"
+    assert first.engine == "sqlite"
+    assert first.table_count == 1
+    assert "CREATE TABLE orders" in first.schema_context
+    assert len(first.fingerprint) == 64
+    assert first.fingerprint == second.fingerprint
+
+    with pytest.raises(DataSourceNotFoundError):
+        service.get_schema("missing")
 
 
 def test_sqlite_executor_is_read_only_and_enforces_row_cap(tmp_path: Path) -> None:
@@ -143,15 +167,18 @@ def test_service_reports_disabled_unknown_and_unavailable_datasources(
     )
     unavailable = QueryExecutionService(
         executors={"missing_file": missing_executor},
+        schema_catalogs={"missing_file": missing_executor},
         enabled=True,
         max_rows=10,
         timeout_ms=1000,
     )
     with pytest.raises(DataSourceUnavailableError):
         unavailable.execute(datasource="missing_file", sql="SELECT 1")
+    with pytest.raises(DataSourceUnavailableError):
+        unavailable.get_schema("missing_file")
 
 
-def test_query_execution_api_returns_datasources_and_rows(tmp_path: Path) -> None:
+def test_query_execution_api_returns_datasources_schema_and_rows(tmp_path: Path) -> None:
     service = make_service(tmp_path)
     app = create_app()
     app.dependency_overrides[get_query_execution_service] = lambda: service
@@ -163,6 +190,14 @@ def test_query_execution_api_returns_datasources_and_rows(tmp_path: Path) -> Non
     assert payload["execution_enabled"] is True
     assert payload["datasources"][0]["name"] == "retail_demo"
     assert payload["datasources"][0]["available"] is True
+
+    schema = client.get("/api/v1/query-execution/datasources/retail_demo/schema")
+    assert schema.status_code == 200, schema.text
+    schema_payload = schema.json()
+    assert schema_payload["engine"] == "sqlite"
+    assert schema_payload["table_count"] == 1
+    assert "CREATE TABLE orders" in schema_payload["schema_context"]
+    assert len(schema_payload["fingerprint"]) == 64
 
     response = client.post(
         "/api/v1/query-execution",
