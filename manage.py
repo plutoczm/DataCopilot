@@ -22,7 +22,6 @@ LOG_DIR = ROOT / "data/logs"
 STATE_FILE = RUNTIME / "services.json"
 ENV_NAME = "datacopilot"
 REQUIRED_IMPORTS = ("chromadb", "fastapi", "streamlit", "pytest")
-PUBLIC_URL = "https://datacopilot-orcin.vercel.app/"
 LOCAL_OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 
 
@@ -39,7 +38,7 @@ def conda_executable() -> str:
     for candidate in candidates:
         if candidate and Path(candidate).is_file():
             return str(Path(candidate).resolve())
-    raise RuntimeError("Miniconda/Conda was not found. Install it first or use `python manage.py public`.")
+    raise RuntimeError("Miniconda/Conda was not found. Install it first or use the Docker Compose deployment.")
 
 
 def runtime_environment() -> dict[str, str]:
@@ -201,7 +200,6 @@ def start(backend_port: int, frontend_port: int, lan: bool, open_browser: bool) 
     )
     print(f"DataCopilot is ready: {frontend_url}")
     print(f"API docs: {backend_url}/docs")
-    print(f"Public URL: {PUBLIC_URL}")
     if open_browser:
         webbrowser.open(frontend_url)
 
@@ -226,7 +224,6 @@ def main() -> None:
     subparsers.add_parser("stop")
     subparsers.add_parser("status")
     subparsers.add_parser("setup")
-    subparsers.add_parser("public")
     args = parser.parse_args()
     if args.command == "start":
         start(args.backend_port, args.frontend_port, args.lan, not args.no_open)
@@ -238,9 +235,6 @@ def main() -> None:
         print(state.get("frontend_url") if pids and all(process_is_running(pid) for pid in pids) else "stopped")
     elif args.command == "setup":
         print(f"Environment ready: {ensure_environment()}")
-    else:
-        print(PUBLIC_URL)
-        webbrowser.open(PUBLIC_URL)
 
 
 if __name__ == "__main__":
