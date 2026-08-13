@@ -18,6 +18,7 @@ from backend.app.presentation.api.dependencies.providers import (
     get_rag_service,
     get_vector_store,
 )
+from backend.app.presentation.api.routes import knowledge as knowledge_routes
 
 
 class FakeDocumentRegistry:
@@ -315,6 +316,79 @@ def test_document_upload_stages_file_under_configured_temp_dir() -> None:
     assert upload.status_code == 201
     assert ingestion_service.seen_path is not None
     assert ingestion_service.seen_path.is_relative_to(settings.paths.temp_dir)
+
+
+def test_document_upload_rejects_empty_file() -> None:
+    client = make_client()
+
+    response = client.post(
+        "/api/v1/knowledge/documents",
+        files={"file": ("empty.txt", b"", "text/plain")},
+    )
+
+    assert response.status_code == 400
+
+
+def test_document_upload_rejects_file_above_server_limit(monkeypatch) -> None:
+    monkeypatch.setattr(knowledge_routes, "MAX_UPLOAD_SIZE_BYTES", 8)
+    monkeypatch.setattr(knowledge_routes, "UPLOAD_CHUNK_SIZE_BYTES", 3)
+    ingestion_service = RecordingIngestionService()
+    client = make_client(ingestion_service=ingestion_service)
+
+    response = client.post(
+        "/api/v1/knowledge/documents",
+        files={"file": ("too-large.txt", b"123456789", "text/plain")},
+    )
+
+    assert response.status_code == 413
+    assert ingestion_service.seen_path is None
+
+
+def test_document_upload_accepts_file_at_server_limit(monkeypatch) -> None:
+    monkeypatch.setattr(knowledge_routes, "MAX_UPLOAD_SIZE_BYTES", 8)
+    monkeypatch.setattr(knowledge_routes, "UPLOAD_CHUNK_SIZE_BYTES", 3)
+    ingestion_service = RecordingIngestionService()
+    client = make_client(ingestion_service=ingestion_service)
+
+    response = client.post(
+        "/api/v1/knowledge/documents",
+        files={"file": ("limit.txt", b"12345678", "text/plain")},
+    )
+
+    assert response.status_code == 201
+    assert ingestion_service.seen_path is not None
+    assert not ingestion_service.seen_path.exists()
+
+
+def test_document_upload_cleans_staging_after_ingestion_failure() -> None:
+    class FailingIngestionService(FakeIngestionService):
+        def __init__(self) -> None:
+            self.seen_path: Path | None = None
+
+        async def ingest_file(
+            self,
+            file_path: Path,
+            *,
+            collection_name: str,
+            domain: str,
+            tags=None,
+        ):
+            self.seen_path = file_path
+            assert file_path.exists()
+            raise RuntimeError("ingestion failed")
+
+    ingestion_service = FailingIngestionService()
+    client = make_client(ingestion_service=ingestion_service)
+
+    response = client.post(
+        "/api/v1/knowledge/documents",
+        files={"file": ("broken.txt", b"content", "text/plain")},
+    )
+
+    assert response.status_code == 500
+    assert ingestion_service.seen_path is not None
+    assert not ingestion_service.seen_path.exists()
+    assert not ingestion_service.seen_path.parent.exists()
 
 
 def test_knowledge_query_returns_answer_and_citations() -> None:
