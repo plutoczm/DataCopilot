@@ -13,7 +13,7 @@ class _NoopStreamlit:
                 return kwargs.get("value") or (args[1] if len(args) > 1 else "")
             if name == "segmented_control":
                 return kwargs.get("default")
-            if name == "slider":
+            if name in {"slider", "number_input"}:
                 return kwargs.get("value", 5)
             if name == "file_uploader":
                 return None
