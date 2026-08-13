@@ -22,7 +22,15 @@ class StubQueryExecutionService:
     def list_datasources(self):
         return []
 
-    def execute(self, *, datasource, sql, max_rows=None, actor="anonymous"):
+    def execute(
+        self,
+        *,
+        datasource,
+        sql,
+        max_rows=None,
+        actor="anonymous",
+        expected_schema_fingerprint=None,
+    ):
         return QueryExecutionResult(
             query_id=actor,
             datasource=datasource,
