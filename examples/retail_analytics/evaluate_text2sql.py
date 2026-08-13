@@ -2,13 +2,20 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 import time
 from pathlib import Path
 from typing import Any
 
 import httpx
 
-from backend.app.application.evaluation import (
+
+HERE = Path(__file__).resolve().parent
+PROJECT_ROOT = HERE.parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from backend.app.application.evaluation import (  # noqa: E402
     SafetyPolicyCase,
     SafetyPolicyReport,
     Text2SQLBenchmarkCase,
@@ -18,8 +25,6 @@ from backend.app.application.evaluation import (
 )
 
 
-HERE = Path(__file__).resolve().parent
-PROJECT_ROOT = HERE.parents[1]
 DEFAULT_REPORT = PROJECT_ROOT / "data" / "evaluation" / "retail_text2sql_report.json"
 
 
