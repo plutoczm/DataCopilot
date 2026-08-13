@@ -2,40 +2,41 @@
 
 面向数据分析与数据工程场景的 **AI Application Copilot**。
 
-DataPilot-AI 不把“接了大模型 API”当作完成。项目围绕一条可验证的应用链路组织：
+DataPilot-AI 不把“接入一个大模型 API”当作项目完成。主链路围绕真实企业数据分析流程组织：
 
-**企业知识检索 → Text2SQL → 确定性安全校验 → SQL 审核 → 受治理只读执行 → 可量化评测 → API / UI 交付**。
+**企业知识 → 数据源 Schema 自动发现 → Text2SQL → 确定性安全校验 → SQL Review → 显式只读执行 → Golden Result 评测 → API / UI 交付**。
 
 目标岗位：AI 应用开发、LLM Application Engineer、AI Backend Engineer。
 
 ## 解决什么问题
 
-数据团队的常见瓶颈不是缺少聊天框，而是业务知识、SQL 生成和数据库治理彼此割裂：
+真实 Text2SQL 产品的难点不是“让模型吐出一段 SQL”，而是把业务语义、元数据、模型生成、安全治理、数据库权限和质量评测连成闭环：
 
-1. 业务人员不知道表结构、指标口径和数据规范；
-2. 数据人员反复把自然语言需求翻译成 SQL；
-3. LLM 生成 SQL 即使语法正确，也可能引用不存在的表字段或产生高风险语句；
-4. 只做“生成 SQL”的 Demo 无法证明查询真正能执行；
-5. 没有 benchmark 时，项目很难回答“质量如何、成本如何、失败在哪里”。
+1. 业务人员不知道表结构和指标口径；
+2. 手工复制 DDL 到 Prompt 不可维护，Schema 变化后容易漂移；
+3. LLM 可能引用不存在的表字段，或者生成危险 SQL；
+4. SQL 语法正确、能够执行，并不代表业务答案正确；
+5. 数据库读取本身也需要权限、超时、行数和审计边界；
+6. 没有 benchmark，就无法回答模型质量、失败模式和回归风险。
 
-DataPilot-AI 将这些问题串成一个工程闭环：
+项目因此把“生成能力”和“生产治理”分开设计：
 
 ```mermaid
 flowchart LR
-    User[业务问题] --> Agent[LangGraph Agent]
-    Agent --> RAG[RAG / 指标口径]
-    Agent --> T2S[Text2SQL]
+    User[业务问题] --> UI[Streamlit / API]
+    UI --> DS[Datasource Schema Catalog]
+    DS --> T2S[Text2SQL]
+    KB[RAG / 指标口径] --> T2S
     T2S --> Guard[SQLValidator]
     Guard --> Review[SQL Review]
-    Review --> Execute[受治理只读执行]
-    Execute --> Result[结构化查询结果]
-    Result --> Eval[Benchmark / Evaluation]
-    RAG --> LLM[LLMProvider]
-    T2S --> LLM
-    Review --> LLM
+    Review --> Explicit[显式执行操作]
+    Explicit --> Policy[ReadOnlySQLPolicy]
+    Policy --> DB[Read-only Datasource]
+    DB --> Result[结构化结果]
+    Result --> Oracle[Golden Result Oracle]
 ```
 
-> 查询执行功能**默认关闭**。内置 SQLite 适配器用于可复现本地演示；接入生产 MySQL、ClickHouse 等数据库时仍必须使用独立只读账号、Secret 管理和数据库原生资源治理。
+> SQL 执行功能默认关闭。Schema 元数据读取和模型 SQL 执行是两个不同权限边界：即使执行关闭，应用仍可读取已配置数据源的非敏感 Schema 用于生成与审核。
 
 ## 核心能力
 
@@ -45,103 +46,149 @@ flowchart LR
 - BGE-M3 Embedding + ChromaDB 持久化；
 - Dense + BM25 混合召回、RRF 融合和轻量重排；
 - 引用返回与低相关度拒答；
-- 指标口径、表说明、数据规范可以作为 Text2SQL 的业务上下文。
+- 指标口径、数据规范和业务定义可以作为 Text2SQL 的业务语义上下文；
+- 文档 Registry 使用 SQLite 持久化，不把文档目录状态只放在进程内内存。
 
-### 2. Text2SQL
+### 2. Datasource Schema 自动发现
+
+项目引入独立 `SchemaCatalog` 领域端口。Text2SQL 支持两种输入模式：
+
+- **Datasource 模式**：选择已配置数据源，服务端自动读取表结构并绑定 SQL Engine；
+- **Manual Schema 模式**：用于 Hive/Spark/ClickHouse 等尚未配置在线 Catalog 的场景。
+
+SQLite 演示适配器会从 `sqlite_schema` 生成确定性 Schema Snapshot，并返回 SHA-256 fingerprint。生成结果会携带：
+
+- `schema_source`；
+- `datasource`；
+- `schema_fingerprint`；
+- 发现的表数量。
+
+这使问题可以从“复制 DDL 到文本框”升级为真正的：
+
+**选择数据源 → 自动获取 Schema → 生成 SQL → 校验 → 执行**。
+
+### 3. Text2SQL
 
 - 支持 SQLite、MySQL、Hive、Spark SQL、ClickHouse；
 - Prompt 显式注入 Schema、目标引擎和可选 RAG 上下文；
-- JSON 结构化解析；
-- 检查未知表、未知字段、JOIN、`SELECT *` 和引擎特定风险；
+- JSON 结构化输出解析；
+- 未知表、未知字段、JOIN、笛卡尔积、`SELECT *` 和引擎规则检查；
 - 只接受单条 `SELECT/WITH`；
 - 拒绝常见 DML、DDL、权限和管理语句；
-- 返回 SQL、解释、优化建议、置信度、校验结果和 Token 用量。
+- Datasource 模式自动校验请求引擎与数据源引擎一致性；
+- 返回 SQL、解释、优化建议、置信度、校验结果、Token 用量和 Schema provenance。
 
-### 3. SQL Review
+### 4. SQL Review
 
 - 确定性规则 + 可选 LLM 解释；
 - 风险评分、规则问题和优化建议结构化输出；
-- 可以和 Text2SQL 组成“生成 → 校验 → 审核”多步骤流程。
+- 可与 Text2SQL 组成“生成 → 校验 → 审核”多步骤流程；
+- 核心安全判断不依赖 LLM 自评。
 
-### 4. 受治理的只读查询执行
+### 5. 受治理只读执行
 
-新增独立 `QueryExecutor` 领域端口和 `QueryExecutionService`，执行能力不直接耦合 Text2SQL。
+独立 `QueryExecutor` 端口和 `QueryExecutionService`，不把数据库执行藏在 `Text2SQLService.execute=True` 之类的开关中。
 
-当前 SQLite 适配器采用多层防护：
+当前 SQLite 适配器采用 defense-in-depth：
 
-- 执行能力默认 `enabled=false`；
-- 只允许配置中的白名单数据源；
-- 应用层再次执行 `ReadOnlySQLPolicy`；
+- 默认 `DATACOPILOT_QUERY_EXECUTION__ENABLED=false`；
+- 只允许服务端配置的数据源名称，不接受客户端 DB URL/path；
+- 执行前再次经过 `ReadOnlySQLPolicy`；
 - 只允许单条 `SELECT/WITH`；
-- 拒绝写入、DDL、管理语句、`PRAGMA`、extension/file loading 等危险入口；
-- SQLite 使用 URI `mode=ro`；
-- 连接启用 `PRAGMA query_only = ON`；
-- 服务端强制最大返回行数；
-- SQLite progress handler 实现执行 deadline；
-- 审计记录 Query ID、数据源、SQL SHA-256、状态、行数和耗时，不把原始 SQL/凭据写入结构化审计字段。
+- 拒绝写入、DDL、管理语句、`PRAGMA`、extension/file loading 等入口；
+- SQLite URI `mode=ro`；
+- `PRAGMA query_only = ON`；
+- 服务端最大返回行数；
+- progress handler 查询 deadline；
+- Query ID + actor + datasource + SQL SHA-256 + status + latency 审计。
 
-这是一条 **defense-in-depth** 边界：应用层字符串策略不能替代数据库只读权限。
+应用层规则不能替代数据库原生权限。生产 MySQL/ClickHouse 必须继续使用专用只读账号、statement timeout、资源组/扫描量限制和 Secret Manager。
 
-### 5. LangGraph Agent
+### 6. API Key + RBAC
+
+可选 API Key 鉴权使用 `X-API-Key`，包含：
+
+- `reader`：读取受保护 API 与 Schema 元数据；
+- `analyst`：可显式执行受治理只读查询；
+- `admin`：管理级权限。
+
+密钥使用 constant-time compare。开发环境可关闭鉴权；生产部署应开启并从 Secret Store 注入。
+
+当前是轻量 API-key RBAC，不把它包装成完整企业 IAM。真正多租户生产环境仍需要 OIDC/SSO、Workspace/Tenant 隔离和 tenant-scoped policy。
+
+### 7. LangGraph Agent
 
 - 显式意图识别和条件路由；
 - RAG、Text2SQL、SQL Review、数仓设计、通用对话；
-- `validate_result` 结果校验节点；
+- `validate_result` 结果校验；
 - 会话短期记忆、摘要压缩、最大执行步数和会话清理；
-- 路由路径与工具调用可测试、可观测。
+- 路由路径、工具调用和 Token 使用可观察。
 
-> 当前不让 Agent 自动触发数据库执行。执行动作保留为显式 API/UI 操作，避免把高风险副作用隐藏在自主 Agent 链路中。
+数据库执行**没有**注册成 Agent Tool。即使是只读查询，它也会消耗真实数据库资源，因此保留为用户显式 API/UI 动作，而不是隐藏在自主 Agent 链路中。
 
-### 6. 可量化 Benchmark
+### 8. Golden Result Text2SQL Benchmark
 
-`backend/app/application/evaluation/` 与 `examples/retail_analytics/evaluate_text2sql.py` 将质量拆成独立指标：
+`examples/retail_analytics/questions.json` 为每个业务问题提供：
+
+- 期望物理表；
+- 结构特征；
+- `golden_sql` 结果 Oracle。
+
+Benchmark 会在同一个受治理只读数据源上分别执行生成 SQL 与 Golden SQL，并比较结果集，而不是把“SQL 执行成功”当作“业务回答正确”。核心指标包括：
 
 - Generation Success Rate；
 - Valid SQL Rate；
 - Execution Attempt / Success Rate；
 - Expected Table Recall；
 - Schema Hallucination Rate；
+- Result Oracle Coverage；
+- Result Comparison Rate；
+- **Business Result Accuracy**；
 - Average / P95 Generation Latency；
 - Execution Latency；
-- Total / Average Token Usage；
+- Token Usage；
 - Safety Policy Decision Accuracy；
-- Unsafe Rejection Rate；
-- Safe Acceptance Rate。
+- Unsafe Rejection Rate / Safe Acceptance Rate。
 
-**Execution Success 不等于业务结果正确率。** 在没有 golden result / oracle 之前，项目不会把“SQL 能运行”包装成“业务答案准确”。这也是评测报告中的明确说明。
+`business_result_accuracy` 按全部有 Oracle 的 case 计算，因此生成失败、校验失败和执行失败都会真实拉低端到端准确率，不只统计成功样本。
 
-## 工程化架构
+当前零售 Oracle 适合小型聚合查询：忽略行顺序和列别名，并对浮点数做有限容差。复杂生产查询应使用 case-specific oracle，而不是声称存在一个通用 SQL 等价判定器。
+
+## 工程架构
 
 ```text
 backend/app/
-├── core/                 配置、日志、运行时治理
-├── domain/               LLM / VectorStore / QueryExecutor 端口
+├── core/                 配置、日志、安全默认值
+├── domain/               LLMProvider / VectorStore / QueryExecutor / SchemaCatalog
 ├── application/
 │   ├── agent/
 │   ├── rag/
 │   ├── text2sql/
 │   ├── sql_review/
 │   ├── query_execution/  只读策略、执行服务、审计
-│   └── evaluation/       Agent / Text2SQL / Safety benchmark
+│   └── evaluation/       Agent / Text2SQL / Safety / Golden Result metrics
 ├── infrastructure/
 │   ├── llm/              DeepSeek / OpenAI / Ollama
 │   ├── vectorstore/      ChromaDB
 │   ├── embeddings/
-│   └── query_execution/  SQLiteReadOnlyExecutor
-└── presentation/api/     FastAPI Route / Schema / DI
+│   ├── registry/         SQLite document registry
+│   └── query_execution/  SQLite read-only executor + schema catalog
+└── presentation/api/     FastAPI Route / Schema / DI / Security
 ```
 
 工程措施：
 
-- Clean Architecture 风格的端口/适配器隔离；
-- Pydantic Settings 和安全默认值；
-- 外部 LLM 超时、有限重试、健康检查；
+- Ports & Adapters / Clean Architecture 风格隔离；
+- Pydantic Settings 与 production safety validation；
+- 外部 LLM timeout、有限 retry、health check；
 - SSE 流式输出；
-- request ID / trace ID / JSON 日志；
-- 查询执行超时、行数上限、审计；
-- Docker Compose 健康检查和 CPU/内存边界；
-- GitHub Actions：Python compile、Compose config、pytest、Coverage >= 85%；
-- 可复现业务数据集和 benchmark，而不是只依赖在线模型的人工截图。
+- request ID / trace ID / JSON logging；
+- API key / RBAC；
+- Schema provenance / fingerprint；
+- 查询 timeout、row cap、read-only DB mode、audit；
+- Docker Compose healthcheck 与 CPU/内存边界；
+- GitHub Actions：compile、Compose validation、pytest、Coverage >= 85%；
+- 可复现零售数据、Safety cases、Golden Result benchmark。
 
 ## 为什么主动删除微调和任务级多模型路由
 
@@ -149,32 +196,32 @@ backend/app/
 
 - `training/` QLoRA / Unsloth 微调子系统；
 - `RoutingLLMProvider` / `TaskBoundLLMProvider`；
-- 任务级 local/cloud 路由配置；
+- 任务级 local/cloud 路由；
 - 与产品交付无关的生成式规划产物。
 
-原因：**AI Application Engineering 的核心不是组件数量，而是业务闭环、安全边界、评测、部署、可维护性。** 模型训练可以作为独立 Model Engineering 项目，不应为了“技术栈丰富”侵入应用主链路。
+原因不是这些技术“没用”，而是它们没有证明对当前业务链路的收益，却增加了配置、测试和解释成本。AI Application Engineering 更应该优先证明：**业务闭环、安全边界、可评测性、部署和维护性**。
 
-## 可复现零售经营分析场景
+## 可复现零售经营分析
 
 ```text
 examples/retail_analytics/
-├── schema.sql                 订单/客户/商品/退款 Schema
-├── seed.sql                   演示数据
-├── setup_demo_db.py           构建本地 SQLite 数据库
-├── metric_definitions.md      GMV、退款率、客单价等业务口径
-├── questions.json             Text2SQL benchmark 问题集
-├── safety_cases.json          只读安全决策测试集
-├── run_demo.py                生成 + 可选执行演示
-└── evaluate_text2sql.py       生成 benchmark JSON 报告
+├── schema.sql
+├── seed.sql
+├── setup_demo_db.py
+├── metric_definitions.md
+├── questions.json             问题 + Golden SQL Oracle
+├── safety_cases.json
+├── run_demo.py
+└── evaluate_text2sql.py       E2E + Safety benchmark
 ```
 
-初始化数据库：
+初始化：
 
 ```bash
 python examples/retail_analytics/setup_demo_db.py --force
 ```
 
-`.env` 中显式开启**本地演示**执行能力：
+开启本地演示执行：
 
 ```text
 DATACOPILOT_QUERY_EXECUTION__ENABLED=true
@@ -182,39 +229,45 @@ DATACOPILOT_QUERY_EXECUTION__DATASOURCE_NAME=retail_demo
 DATACOPILOT_QUERY_EXECUTION__SQLITE_PATH=data/demo/retail_analytics.db
 ```
 
-然后运行：
+启动后，Streamlit Text2SQL 页面可直接选择 `retail_demo`，无需手工复制 Schema。
+
+运行 benchmark：
 
 ```bash
-python examples/retail_analytics/run_demo.py
 python examples/retail_analytics/evaluate_text2sql.py
-```
-
-Benchmark 报告默认写入：
-
-```text
-data/evaluation/retail_text2sql_report.json
-```
-
-如要验证 RAG 对指标口径的影响，可先摄取 `metric_definitions.md`，再执行：
-
-```bash
 python examples/retail_analytics/evaluate_text2sql.py --use-rag
 ```
 
-## API 中的执行边界
+开启 API 鉴权后：
+
+```bash
+DATACOPILOT_API_KEY=<analyst-key> python examples/retail_analytics/evaluate_text2sql.py
+```
+
+报告默认写入 `data/evaluation/retail_text2sql_report.json`。README 不写未经真实运行得到的模型准确率；简历上的效果数字应来自固定模型、固定配置和保存的 benchmark 报告。
+
+## 关键 API
 
 ```text
+GET  /health
+GET  /api/v1/auth/me
+POST /api/v1/text2sql
 GET  /api/v1/query-execution/datasources
+GET  /api/v1/query-execution/datasources/{datasource}/schema
 POST /api/v1/query-execution
 ```
 
-前端 Text2SQL 页面只有在以下条件全部满足时才显示可执行操作：
+Datasource Text2SQL 示例：
 
-1. 生成 SQL 已通过静态校验；
-2. 后端执行能力显式启用；
-3. 白名单数据源可用。
+```json
+{
+  "question": "统计最近30天各区域GMV",
+  "datasource": "retail_demo",
+  "use_rag": true
+}
+```
 
-即使前端允许点击，后端仍会重新执行只读策略和资源限制。
+服务端自动发现 Schema 与 SQL Engine。`datasource` 与 `schema_context` 互斥，防止请求同时提供两份可能冲突的元数据。
 
 ## 快速开始
 
@@ -224,7 +277,7 @@ conda activate datacopilot
 cp .env.example .env
 ```
 
-至少配置一个可用模型，例如：
+配置至少一个模型，例如：
 
 ```text
 DEEPSEEK_API_KEY=你的密钥
@@ -234,12 +287,6 @@ DEEPSEEK_API_KEY=你的密钥
 
 ```bash
 python manage.py start --no-open
-```
-
-Windows 也可使用：
-
-```bat
-start.cmd
 ```
 
 默认访问：
@@ -255,13 +302,7 @@ docker compose --env-file docker/.env.production config --quiet
 docker compose --env-file docker/.env.production up -d --build
 ```
 
-生产默认配置保持：
-
-```text
-DATACOPILOT_QUERY_EXECUTION__ENABLED=false
-```
-
-本地 Ollama 可通过 Compose profile 启用；模型选择只发生在组合根，不侵入 RAG/Text2SQL 业务代码。
+生产默认保持 SQL 执行关闭，再由部署环境显式授权需要的能力。
 
 ## 测试与质量门禁
 
@@ -271,7 +312,7 @@ docker compose --env-file docker/.env.production config --quiet
 python -m pytest -q --cov=backend --cov=frontend --cov-report=term-missing --cov-fail-under=85
 ```
 
-GitHub Actions 对 PR 执行同类门禁。简历和面试中的模型效果数据应来自实际 benchmark 报告，不在 README 中写未经运行验证的准确率。
+GitHub Actions 对 PR 执行同类门禁。模型效果指标与代码覆盖率分开治理：coverage 证明代码路径被测试，不代表 LLM 质量。
 
 ## 主要技术栈
 
@@ -280,10 +321,19 @@ GitHub Actions 对 PR 执行同类门禁。简历和面试中的模型效果数�
 - LangGraph / LangChain Core
 - ChromaDB / BGE-M3
 - DeepSeek / OpenAI / Ollama / httpx
-- SQLite（可复现只读执行 Demo）
+- SQLite（可复现 Registry、Schema Catalog、只读执行 Demo）
 - Streamlit
 - Docker Compose
 - pytest / pytest-cov / GitHub Actions
+
+## 后续成熟化优先级
+
+1. **真正的多数据源 Registry**：MySQL / ClickHouse metadata + read-only adapter，凭据接 Secret Manager；
+2. **企业身份与租户边界**：OIDC/SSO、Workspace/Tenant 隔离、tenant-scoped RBAC 与审计；
+3. **可观测性**：OpenTelemetry、LLM/Query span、P95/error-rate/token-cost dashboard；
+4. **异步摄取**：任务队列、状态查询、幂等、失败重试和死信处理；
+5. **分布式状态**：Redis/DB 会话状态、共享缓存和多实例部署；
+6. **评测回归门禁**：更多 case-specific golden oracle、固定模型配置、阈值比较和 benchmark CI。
 
 ## 文档
 
@@ -292,12 +342,3 @@ GitHub Actions 对 PR 执行同类门禁。简历和面试中的模型效果数�
 - [部署指南](docs/DEPLOYMENT.md)
 - [面试讲解](docs/INTERVIEW_GUIDE.md)
 - [路线图](docs/ROADMAP.md)
-
-## 后续成熟化优先级
-
-1. 数据源 Registry + MySQL / ClickHouse **只读账号适配器**，凭据接入 Secret Manager；
-2. golden SQL / golden result oracle，增加真正的业务结果正确率；
-3. API 鉴权、Workspace / Tenant 隔离、RBAC；
-4. OpenTelemetry + LLM tracing + P95 / error-rate / token-cost dashboard；
-5. 文档摄取异步任务队列、任务状态和失败重试；
-6. 将进程内会话/文档 Registry 替换为 Redis / DB 持久化。
