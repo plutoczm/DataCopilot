@@ -13,6 +13,7 @@ from backend.app.application.text2sql.prompt_builder import PromptBuilder
 from backend.app.application.text2sql.schema_service import SchemaService
 from backend.app.application.text2sql.sql_validator import SQLValidator
 from backend.app.domain.ports.llm_provider import LLMProvider
+from backend.app.domain.ports.schema_catalog import SchemaCatalog
 
 
 DEFAULT_OPTIMIZATION_HINTS: dict[SQLEngine, list[str]] = {
@@ -48,12 +49,14 @@ class Text2SQLService:
         *,
         llm_provider: LLMProvider,
         rag_service: RAGService | None = None,
+        schema_catalogs: dict[str, SchemaCatalog] | None = None,
         schema_service: SchemaService | None = None,
         prompt_builder: PromptBuilder | None = None,
         sql_validator: SQLValidator | None = None,
     ) -> None:
         self.llm_provider = llm_provider
         self.rag_service = rag_service
+        self.schema_catalogs = schema_catalogs or {}
         self.schema_service = schema_service or SchemaService()
         self.prompt_builder = prompt_builder or PromptBuilder()
         self.sql_validator = sql_validator or SQLValidator()
@@ -62,14 +65,24 @@ class Text2SQLService:
         self,
         *,
         question: str,
-        engine: SQLEngine,
+        engine: SQLEngine | None = None,
         schema_context: str | None = None,
         database_name: str | None = None,
+        datasource: str | None = None,
         use_rag: bool = False,
         rag_collection_name: str = "knowledge_base",
     ) -> Text2SQLResult:
+        (
+            resolved_engine,
+            resolved_schema_context,
+            schema_metadata,
+        ) = self._resolve_schema_source(
+            engine=engine,
+            schema_context=schema_context,
+            datasource=datasource,
+        )
         schema = self.schema_service.parse_schema_context(
-            schema_context,
+            resolved_schema_context,
             database_name=database_name,
         )
         rag_context = await self._retrieve_rag_context(
@@ -79,7 +92,7 @@ class Text2SQLService:
         )
         messages = self.prompt_builder.build_messages(
             question=question,
-            engine=engine,
+            engine=resolved_engine,
             schema=schema,
             rag_context=rag_context,
         )
@@ -89,26 +102,91 @@ class Text2SQLService:
         if not sql:
             raise SQLGenerationError("LLM response did not include SQL")
 
-        validation = self.sql_validator.validate(sql, schema=schema, engine=engine)
+        validation = self.sql_validator.validate(
+            sql,
+            schema=schema,
+            engine=resolved_engine,
+        )
         suggestions = self._merge_optimization_suggestions(
             payload.get("optimization_suggestions"),
-            engine,
+            resolved_engine,
         )
         confidence = self._normalize_confidence(payload.get("confidence"), validation)
+        metadata: dict[str, str | int | float | bool] = {
+            "llm_provider": llm_response.provider,
+            "llm_model": llm_response.model,
+            "rag_used": use_rag,
+            "schema_table_count": len(schema.tables),
+            **schema_metadata,
+        }
         return Text2SQLResult(
             sql=sql,
             explanation=str(payload.get("explanation", "")).strip()
             or "SQL generated from the provided natural language request and schema.",
             optimization_suggestions=suggestions,
-            engine=engine,
+            engine=resolved_engine,
             confidence=confidence,
             validation=validation,
             token_usage=llm_response.usage,
-            metadata={
-                "llm_provider": llm_response.provider,
-                "llm_model": llm_response.model,
-                "rag_used": use_rag,
-                "schema_table_count": len(schema.tables),
+            metadata=metadata,
+        )
+
+    def _resolve_schema_source(
+        self,
+        *,
+        engine: SQLEngine | None,
+        schema_context: str | None,
+        datasource: str | None,
+    ) -> tuple[SQLEngine, str | None, dict[str, str | int | float | bool]]:
+        normalized_datasource = (datasource or "").strip()
+        explicit_schema = (schema_context or "").strip()
+
+        if not normalized_datasource:
+            return (
+                engine or SQLEngine.HIVE,
+                schema_context,
+                {"schema_source": "request" if explicit_schema else "none"},
+            )
+
+        if explicit_schema:
+            raise SQLGenerationError(
+                "Provide either datasource or schema_context, not both. "
+                "Use RAG for business definitions that augment datasource metadata."
+            )
+
+        catalog = self.schema_catalogs.get(normalized_datasource)
+        if catalog is None:
+            raise SQLGenerationError(
+                f"Unknown datasource '{normalized_datasource}' for schema discovery."
+            )
+        if not catalog.available():
+            raise SQLGenerationError(
+                f"Datasource '{normalized_datasource}' is unavailable for schema discovery."
+            )
+
+        snapshot = catalog.load_schema()
+        try:
+            datasource_engine = SQLEngine(snapshot.engine)
+        except ValueError as exc:
+            raise SQLGenerationError(
+                f"Datasource '{normalized_datasource}' uses unsupported SQL engine "
+                f"'{snapshot.engine}'."
+            ) from exc
+
+        if engine is not None and engine is not datasource_engine:
+            raise SQLGenerationError(
+                f"Requested engine '{engine.value}' does not match datasource engine "
+                f"'{datasource_engine.value}'."
+            )
+
+        return (
+            datasource_engine,
+            snapshot.schema_context,
+            {
+                "schema_source": "datasource",
+                "datasource": snapshot.datasource,
+                "schema_fingerprint": snapshot.fingerprint,
+                "schema_table_count_discovered": snapshot.table_count,
             },
         )
 
