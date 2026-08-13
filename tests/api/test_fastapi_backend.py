@@ -3,6 +3,7 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
+from backend.app.application.rag.document_catalog_service import DocumentCatalogService
 from backend.app.application.rag.models import Citation, IngestionResult, RAGResponse
 from backend.app.core.settings import Settings
 from backend.app.domain.ports.llm_provider import LLMHealthStatus, LLMUsage
@@ -11,8 +12,8 @@ from backend.app.infrastructure.vectorstore.exceptions import CollectionNotFound
 from backend.app.main import create_app
 from backend.app.presentation.api.dependencies.providers import (
     get_app_settings,
+    get_document_catalog_service,
     get_document_ingestion_service,
-    get_document_registry,
     get_llm_provider,
     get_rag_service,
     get_vector_store,
@@ -99,6 +100,32 @@ class RecordingIngestionService(FakeIngestionService):
         )
 
 
+def make_client(
+    *,
+    settings: Settings | None = None,
+    vector_store: FakeVectorStore | None = None,
+    ingestion_service: FakeIngestionService | None = None,
+) -> TestClient:
+    app = create_app()
+    registry = FakeDocumentRegistry()
+    store = vector_store or FakeVectorStore()
+    resolved_settings = settings or Settings(_env_file=None)
+    if settings is not None:
+        app.dependency_overrides[get_app_settings] = lambda: settings
+    app.dependency_overrides[get_llm_provider] = lambda: FakeLLM()
+    app.dependency_overrides[get_vector_store] = lambda: store
+    app.dependency_overrides[get_document_ingestion_service] = (
+        lambda: ingestion_service or FakeIngestionService()
+    )
+    app.dependency_overrides[get_rag_service] = lambda: FakeRAGService()
+    app.dependency_overrides[get_document_catalog_service] = lambda: DocumentCatalogService(
+        registry=registry,
+        vector_store=store,
+        uploads_dir=resolved_settings.paths.uploads_dir,
+    )
+    return TestClient(app, raise_server_exceptions=False)
+
+
 class FakeRAGService:
     async def answer(
         self,
@@ -134,26 +161,6 @@ class FakeRAGService:
             metadata={"collection_name": collection_name, "retrieved_count": 1},
             token_usage=LLMUsage(prompt_tokens=10, completion_tokens=5, total_tokens=15),
         )
-
-
-def make_client(
-    *,
-    settings: Settings | None = None,
-    vector_store: FakeVectorStore | None = None,
-    ingestion_service: FakeIngestionService | None = None,
-) -> TestClient:
-    app = create_app()
-    registry = FakeDocumentRegistry()
-    if settings is not None:
-        app.dependency_overrides[get_app_settings] = lambda: settings
-    app.dependency_overrides[get_llm_provider] = lambda: FakeLLM()
-    app.dependency_overrides[get_vector_store] = lambda: vector_store or FakeVectorStore()
-    app.dependency_overrides[get_document_ingestion_service] = (
-        lambda: ingestion_service or FakeIngestionService()
-    )
-    app.dependency_overrides[get_rag_service] = lambda: FakeRAGService()
-    app.dependency_overrides[get_document_registry] = lambda: registry
-    return TestClient(app, raise_server_exceptions=False)
 
 
 def test_root_endpoint_returns_service_metadata() -> None:
@@ -234,9 +241,43 @@ def test_runtime_config_does_not_expose_secrets() -> None:
     assert payload["capabilities"]["read_only_query_execution"] is False
 
 
-def test_document_upload_list_and_delete() -> None:
+def test_document_upload_list_and_delete(tmp_path: Path) -> None:
+    settings = Settings(
+        _env_file=None,
+        paths={
+            "project_root": tmp_path,
+            "data_dir": "data",
+            "chromadb_dir": "data/chromadb",
+            "uploads_dir": "data/uploads",
+            "logs_dir": "data/logs",
+            "cache_dir": "data/cache",
+            "embeddings_dir": "data/embeddings",
+            "temp_dir": "data/temp",
+            "models_dir": "models",
+        },
+        logging={"file_path": "data/logs/datacopilot.log"},
+    )
+    settings.paths.temp_dir.mkdir(parents=True, exist_ok=True)
+    settings.paths.uploads_dir.mkdir(parents=True, exist_ok=True)
+
+    class UploadingFakeService(FakeIngestionService):
+        async def ingest_file(self, file_path: Path, *, collection_name: str, domain: str, tags=None):
+            stored = settings.paths.uploads_dir / file_path.name
+            stored.write_bytes(file_path.read_bytes())
+            result = await super().ingest_file(
+                stored,
+                collection_name=collection_name,
+                domain=domain,
+                tags=tags,
+            )
+            return result.model_copy(update={"stored_path": stored})
+
     vector_store = FakeVectorStore()
-    client = make_client(vector_store=vector_store)
+    client = make_client(
+        settings=settings,
+        vector_store=vector_store,
+        ingestion_service=UploadingFakeService(),
+    )
 
     upload = client.post(
         "/api/v1/knowledge/documents",
@@ -244,9 +285,8 @@ def test_document_upload_list_and_delete() -> None:
         files={"file": ("spark.txt", b"Spark AQE reduces shuffle.", "text/plain")},
     )
     assert upload.status_code == 201
-    uploaded = upload.json()
-    assert uploaded["document_id"] == "doc-1"
-    assert uploaded["chunk_count"] == 1
+    stored = settings.paths.uploads_dir / "spark.txt"
+    assert stored.exists()
 
     listed = client.get("/api/v1/knowledge/documents")
     assert listed.status_code == 200
@@ -256,6 +296,7 @@ def test_document_upload_list_and_delete() -> None:
     assert deleted.status_code == 200
     assert deleted.json()["deleted"] is True
     assert vector_store.deleted_ids == ["doc-1:0"]
+    assert not stored.exists()
 
     missing = client.delete("/api/v1/knowledge/documents/doc-1")
     assert missing.status_code == 404

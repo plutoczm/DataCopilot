@@ -3,18 +3,16 @@ from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 
+from backend.app.application.rag.document_catalog_service import DocumentCatalogService
 from backend.app.application.rag.document_ingestion_service import DocumentIngestionService
-from backend.app.application.rag.document_registry import DocumentRegistry
 from backend.app.application.rag.rag_service import RAGService
 from backend.app.core.settings import Settings
-from backend.app.domain.ports.vector_store import VectorStore
 from backend.app.presentation.api.dependencies.providers import (
     DEFAULT_KNOWLEDGE_COLLECTION,
     get_app_settings,
+    get_document_catalog_service,
     get_document_ingestion_service,
-    get_document_registry,
     get_rag_service,
-    get_vector_store,
 )
 from backend.app.presentation.api.schemas.common import DeleteResponse
 from backend.app.presentation.api.schemas.knowledge import (
@@ -43,7 +41,7 @@ async def upload_document(
     tags: str = Form(""),
     settings: Settings = Depends(get_app_settings),
     ingestion_service: DocumentIngestionService = Depends(get_document_ingestion_service),
-    registry: DocumentRegistry = Depends(get_document_registry),
+    catalog: DocumentCatalogService = Depends(get_document_catalog_service),
 ) -> DocumentUploadResponse:
     suffix = Path(file.filename or "").suffix.lower()
     if suffix not in {".pdf", ".docx", ".txt", ".md", ".markdown"}:
@@ -64,7 +62,7 @@ async def upload_document(
         temp_path.unlink(missing_ok=True)
         temp_dir.rmdir()
 
-    registry.add(result)
+    catalog.register(result)
     return DocumentUploadResponse(
         document_id=result.document_id,
         filename=result.filename,
@@ -81,7 +79,7 @@ async def upload_document(
     summary="查看知识库文档",
 )
 def list_documents(
-    registry: DocumentRegistry = Depends(get_document_registry),
+    catalog: DocumentCatalogService = Depends(get_document_catalog_service),
 ) -> DocumentListResponse:
     return DocumentListResponse(
         documents=[
@@ -93,7 +91,7 @@ def list_documents(
                 collection_name=document.collection_name,
                 chunk_count=document.chunk_count,
             )
-            for document in registry.list()
+            for document in catalog.list()
         ]
     )
 
@@ -105,17 +103,10 @@ def list_documents(
 )
 def delete_document(
     document_id: str,
-    registry: DocumentRegistry = Depends(get_document_registry),
-    vector_store: VectorStore = Depends(get_vector_store),
+    catalog: DocumentCatalogService = Depends(get_document_catalog_service),
 ) -> DeleteResponse:
-    existing = registry.get(document_id)
-    if existing is None:
+    if not catalog.delete(document_id):
         raise HTTPException(status_code=404, detail="Document not found")
-    vector_store.delete_documents(
-        existing.collection_name,
-        [f"{document_id}:{index}" for index in range(existing.chunk_count)],
-    )
-    registry.delete(document_id)
     return DeleteResponse(deleted=True, document_id=document_id)
 
 

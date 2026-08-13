@@ -2,6 +2,7 @@ from backend.app.application.agent.graph import AgentGraph
 from backend.app.application.query_execution.service import QueryExecutionService
 from backend.app.application.rag.chunking_service import ChunkingService
 from backend.app.application.rag.citation_service import CitationService
+from backend.app.application.rag.document_catalog_service import DocumentCatalogService
 from backend.app.application.rag.document_ingestion_service import DocumentIngestionService
 from backend.app.application.rag.document_registry import DocumentRegistry
 from backend.app.application.rag.rag_service import RAGService
@@ -101,6 +102,15 @@ def get_query_execution_service() -> QueryExecutionService:
             timeout_ms=execution.timeout_ms,
         )
     return _query_execution_service
+
+
+def get_document_catalog_service() -> DocumentCatalogService:
+    settings = get_app_settings()
+    return DocumentCatalogService(
+        registry=get_document_registry(),
+        vector_store=get_vector_store(settings),
+        uploads_dir=settings.paths.uploads_dir,
+    )
 
 
 def get_document_ingestion_service() -> DocumentIngestionService:
