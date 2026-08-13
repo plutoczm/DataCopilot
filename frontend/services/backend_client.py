@@ -172,6 +172,29 @@ class BackendClient:
             )
         )
 
+    def list_query_datasources(self) -> dict[str, Any]:
+        return self._json(
+            self.client.get("/api/v1/query-execution/datasources")
+        )
+
+    def execute_query(
+        self,
+        *,
+        datasource: str,
+        sql: str,
+        max_rows: int = 200,
+    ) -> dict[str, Any]:
+        return self._json(
+            self.client.post(
+                "/api/v1/query-execution",
+                json={
+                    "datasource": datasource,
+                    "sql": sql,
+                    "max_rows": max_rows,
+                },
+            )
+        )
+
     def sql_review(
         self,
         sql: str,
