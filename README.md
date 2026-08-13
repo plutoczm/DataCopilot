@@ -2,136 +2,221 @@
 
 面向数据分析与数据工程场景的 **AI Application Copilot**。
 
-DataPilot-AI 不是单纯的聊天壳，也不以堆模型为目标。项目围绕一个可落地的主链路组织：**企业知识检索 → 自然语言生成 SQL → 确定性安全校验 → SQL 审核 → LangGraph 工作流编排 → 可观测 API/前端交互**。
+DataPilot-AI 不把“接了大模型 API”当作完成。项目围绕一条可验证的应用链路组织：
 
-适合作为 AI 应用开发、LLM Application Engineer、AI Backend Engineer 等岗位的工程实践项目。
+**企业知识检索 → Text2SQL → 确定性安全校验 → SQL 审核 → 受治理只读执行 → 可量化评测 → API / UI 交付**。
+
+目标岗位：AI 应用开发、LLM Application Engineer、AI Backend Engineer。
 
 ## 解决什么问题
 
-真实数据团队经常遇到两类重复工作：
+数据团队的常见瓶颈不是缺少聊天框，而是业务知识、SQL 生成和数据库治理彼此割裂：
 
-1. 业务人员不知道表结构和指标口径，需要反复询问数据同学；
-2. 数据同学需要把自然语言需求翻译成 SQL，并检查字段、JOIN、性能和风险。
+1. 业务人员不知道表结构、指标口径和数据规范；
+2. 数据人员反复把自然语言需求翻译成 SQL；
+3. LLM 生成 SQL 即使语法正确，也可能引用不存在的表字段或产生高风险语句；
+4. 只做“生成 SQL”的 Demo 无法证明查询真正能执行；
+5. 没有 benchmark 时，项目很难回答“质量如何、成本如何、失败在哪里”。
 
-DataPilot-AI 将这些步骤串成统一应用：
+DataPilot-AI 将这些问题串成一个工程闭环：
 
 ```mermaid
 flowchart LR
     User[业务问题] --> Agent[LangGraph Agent]
     Agent --> RAG[RAG / 指标口径]
     Agent --> T2S[Text2SQL]
-    T2S --> Guard[只读 SQL 校验]
+    T2S --> Guard[SQLValidator]
     Guard --> Review[SQL Review]
-    Review --> Result[结构化结果]
-    RAG --> LLM[LLM Provider]
+    Review --> Execute[受治理只读执行]
+    Execute --> Result[结构化查询结果]
+    Result --> Eval[Benchmark / Evaluation]
+    RAG --> LLM[LLMProvider]
     T2S --> LLM
     Review --> LLM
-    LLM --> DeepSeek[DeepSeek]
-    LLM --> OpenAI[OpenAI]
-    LLM --> Ollama[Ollama]
 ```
 
-项目默认**不直接对生产数据库执行模型生成 SQL**。这是刻意保留的安全边界：生成和审核负责给出可信查询，真正接入生产执行层时仍需要只读账号、查询超时、资源限制和审计。
+> 查询执行功能**默认关闭**。内置 SQLite 适配器用于可复现本地演示；接入生产 MySQL、ClickHouse 等数据库时仍必须使用独立只读账号、Secret 管理和数据库原生资源治理。
 
 ## 核心能力
 
-### RAG 企业知识库
+### 1. RAG 企业知识库
 
-- 支持 TXT、Markdown、PDF、DOCX 文档摄取；
+- TXT、Markdown、PDF、DOCX 文档摄取；
 - BGE-M3 Embedding + ChromaDB 持久化；
-- 稠密向量与 BM25 混合召回、RRF 融合和轻量重排；
-- 返回引用信息，便于检查答案来源；
-- 可把指标口径、表说明、数据规范作为 Text2SQL 上下文。
+- Dense + BM25 混合召回、RRF 融合和轻量重排；
+- 引用返回与低相关度拒答；
+- 指标口径、表说明、数据规范可以作为 Text2SQL 的业务上下文。
 
-### Text2SQL
+### 2. Text2SQL
 
-- 支持 MySQL、Hive、Spark SQL、ClickHouse；
-- Prompt 中显式注入 Schema、目标引擎和业务知识；
-- 对模型 JSON 输出做结构化解析；
-- 校验未知表、未知字段、`SELECT *`、JOIN 条件和引擎特定风险；
-- 只允许单条 `SELECT/WITH` 查询，拒绝 `INSERT/UPDATE/DELETE/DROP/ALTER/TRUNCATE/MERGE/GRANT/...` 等写入或管理语句；
-- 输出 SQL、解释、优化建议、置信度和校验结果。
+- 支持 SQLite、MySQL、Hive、Spark SQL、ClickHouse；
+- Prompt 显式注入 Schema、目标引擎和可选 RAG 上下文；
+- JSON 结构化解析；
+- 检查未知表、未知字段、JOIN、`SELECT *` 和引擎特定风险；
+- 只接受单条 `SELECT/WITH`；
+- 拒绝常见 DML、DDL、权限和管理语句；
+- 返回 SQL、解释、优化建议、置信度、校验结果和 Token 用量。
 
-### SQL Review
+### 3. SQL Review
 
-- 确定性规则与 LLM 解释结合；
-- 风险评分、规则问题、性能建议结构化输出；
-- 与 Text2SQL 组合，可构成“生成 → 校验 → 审核”的完整流程。
+- 确定性规则 + 可选 LLM 解释；
+- 风险评分、规则问题和优化建议结构化输出；
+- 可以和 Text2SQL 组成“生成 → 校验 → 审核”多步骤流程。
 
-### LangGraph Agent
+### 4. 受治理的只读查询执行
 
-- 显式意图识别与条件路由；
-- 支持 RAG、Text2SQL、SQL Review、数仓设计和通用对话；
-- `validate_result` 节点负责结果校验；
+新增独立 `QueryExecutor` 领域端口和 `QueryExecutionService`，执行能力不直接耦合 Text2SQL。
+
+当前 SQLite 适配器采用多层防护：
+
+- 执行能力默认 `enabled=false`；
+- 只允许配置中的白名单数据源；
+- 应用层再次执行 `ReadOnlySQLPolicy`；
+- 只允许单条 `SELECT/WITH`；
+- 拒绝写入、DDL、管理语句、`PRAGMA`、extension/file loading 等危险入口；
+- SQLite 使用 URI `mode=ro`；
+- 连接启用 `PRAGMA query_only = ON`；
+- 服务端强制最大返回行数；
+- SQLite progress handler 实现执行 deadline；
+- 审计记录 Query ID、数据源、SQL SHA-256、状态、行数和耗时，不把原始 SQL/凭据写入结构化审计字段。
+
+这是一条 **defense-in-depth** 边界：应用层字符串策略不能替代数据库只读权限。
+
+### 5. LangGraph Agent
+
+- 显式意图识别和条件路由；
+- RAG、Text2SQL、SQL Review、数仓设计、通用对话；
+- `validate_result` 结果校验节点；
 - 会话短期记忆、摘要压缩、最大执行步数和会话清理；
-- 路由路径和工具使用可以被测试，而不是只依赖不可观测的单 Prompt Agent。
+- 路由路径与工具调用可测试、可观测。
 
-## 工程化设计
+> 当前不让 Agent 自动触发数据库执行。执行动作保留为显式 API/UI 操作，避免把高风险副作用隐藏在自主 Agent 链路中。
 
-后端采用类似 Clean Architecture 的分层：
+### 6. 可量化 Benchmark
+
+`backend/app/application/evaluation/` 与 `examples/retail_analytics/evaluate_text2sql.py` 将质量拆成独立指标：
+
+- Generation Success Rate；
+- Valid SQL Rate；
+- Execution Attempt / Success Rate；
+- Expected Table Recall；
+- Schema Hallucination Rate；
+- Average / P95 Generation Latency；
+- Execution Latency；
+- Total / Average Token Usage；
+- Safety Policy Decision Accuracy；
+- Unsafe Rejection Rate；
+- Safe Acceptance Rate。
+
+**Execution Success 不等于业务结果正确率。** 在没有 golden result / oracle 之前，项目不会把“SQL 能运行”包装成“业务答案准确”。这也是评测报告中的明确说明。
+
+## 工程化架构
 
 ```text
 backend/app/
-├── core/                 配置、常量、日志
-├── domain/               实体与 LLM / VectorStore 端口
-├── application/          Agent、RAG、Text2SQL、SQL Review、Evaluation
-├── infrastructure/       DeepSeek/OpenAI/Ollama、ChromaDB、Embedding、文档加载
-└── presentation/api/     FastAPI 路由、Schema、依赖注入
+├── core/                 配置、日志、运行时治理
+├── domain/               LLM / VectorStore / QueryExecutor 端口
+├── application/
+│   ├── agent/
+│   ├── rag/
+│   ├── text2sql/
+│   ├── sql_review/
+│   ├── query_execution/  只读策略、执行服务、审计
+│   └── evaluation/       Agent / Text2SQL / Safety benchmark
+├── infrastructure/
+│   ├── llm/              DeepSeek / OpenAI / Ollama
+│   ├── vectorstore/      ChromaDB
+│   ├── embeddings/
+│   └── query_execution/  SQLiteReadOnlyExecutor
+└── presentation/api/     FastAPI Route / Schema / DI
 ```
 
-关键工程措施：
+工程措施：
 
-- **Provider 解耦**：业务服务只依赖统一 `LLMProvider`，模型选择只发生在应用组合根；
-- **有限重试和超时**：外部模型调用不做无限重试；
-- **流式输出**：支持 SSE/流式模型响应；
-- **配置隔离**：Pydantic Settings + `.env`，密钥不写入仓库；
-- **结构化日志**：请求耗时、request/trace header 和日志轮转；
-- **容器化**：FastAPI、Streamlit、ChromaDB 和可选 Ollama 使用 Docker Compose；
-- **资源边界**：Compose 为主要服务设置 CPU/内存限制和健康检查；
-- **测试门禁**：GitHub Actions 执行 pytest 与 coverage gate，覆盖率阈值为 85%。
+- Clean Architecture 风格的端口/适配器隔离；
+- Pydantic Settings 和安全默认值；
+- 外部 LLM 超时、有限重试、健康检查；
+- SSE 流式输出；
+- request ID / trace ID / JSON 日志；
+- 查询执行超时、行数上限、审计；
+- Docker Compose 健康检查和 CPU/内存边界；
+- GitHub Actions：Python compile、Compose config、pytest、Coverage >= 85%；
+- 可复现业务数据集和 benchmark，而不是只依赖在线模型的人工截图。
 
-## 为什么删除了部分“看起来高级”的组件
+## 为什么主动删除微调和任务级多模型路由
 
-本分支针对 AI 应用开发岗位做了主动收敛：
+本求职分支移除了：
 
-- 移除独立 `training/` 微调子系统；
-- 移除 `RoutingLLMProvider` / `TaskBoundLLMProvider` 任务级模型路由；
-- 保留 DeepSeek、OpenAI、Ollama 三种明确的运行时 provider；
-- 删除与最终产品无关的生成式规划文档。
+- `training/` QLoRA / Unsloth 微调子系统；
+- `RoutingLLMProvider` / `TaskBoundLLMProvider`；
+- 任务级 local/cloud 路由配置；
+- 与产品交付无关的生成式规划产物。
 
-原因很简单：对于一个 AI 应用项目，**可验证的业务闭环、安全、评测、部署和维护成本**比“同时存在多少模型组件”更重要。微调属于 Model Engineering，可以作为独立项目，而不是强行和应用主仓库耦合。
+原因：**AI Application Engineering 的核心不是组件数量，而是业务闭环、安全边界、评测、部署、可维护性。** 模型训练可以作为独立 Model Engineering 项目，不应为了“技术栈丰富”侵入应用主链路。
 
-## 可复现业务案例：零售经营分析
-
-`examples/retail_analytics/` 提供完整演示材料：
+## 可复现零售经营分析场景
 
 ```text
 examples/retail_analytics/
-├── schema.sql              订单/客户/商品/退款 Schema
-├── metric_definitions.md   GMV、退款率、客单价等业务口径
-├── questions.json          可重复执行的 Text2SQL 问题集
-└── run_demo.py             调用后端 API 的演示脚本
+├── schema.sql                 订单/客户/商品/退款 Schema
+├── seed.sql                   演示数据
+├── setup_demo_db.py           构建本地 SQLite 数据库
+├── metric_definitions.md      GMV、退款率、客单价等业务口径
+├── questions.json             Text2SQL benchmark 问题集
+├── safety_cases.json          只读安全决策测试集
+├── run_demo.py                生成 + 可选执行演示
+└── evaluate_text2sql.py       生成 benchmark JSON 报告
 ```
 
-示例问题：
+初始化数据库：
 
-- 最近 30 天各区域 GMV；
-- 各获客渠道客单价；
-- 商品品类销售额 Top10；
-- 最近 30 天退款率；
-- 退款金额最高的区域。
+```bash
+python examples/retail_analytics/setup_demo_db.py --force
+```
 
-启动后端后运行：
+`.env` 中显式开启**本地演示**执行能力：
+
+```text
+DATACOPILOT_QUERY_EXECUTION__ENABLED=true
+DATACOPILOT_QUERY_EXECUTION__DATASOURCE_NAME=retail_demo
+DATACOPILOT_QUERY_EXECUTION__SQLITE_PATH=data/demo/retail_analytics.db
+```
+
+然后运行：
 
 ```bash
 python examples/retail_analytics/run_demo.py
+python examples/retail_analytics/evaluate_text2sql.py
 ```
 
-把 `metric_definitions.md` 上传知识库并设置 `use_rag=true`，即可演示“业务指标口径 RAG + Text2SQL”的组合能力。
+Benchmark 报告默认写入：
+
+```text
+data/evaluation/retail_text2sql_report.json
+```
+
+如要验证 RAG 对指标口径的影响，可先摄取 `metric_definitions.md`，再执行：
+
+```bash
+python examples/retail_analytics/evaluate_text2sql.py --use-rag
+```
+
+## API 中的执行边界
+
+```text
+GET  /api/v1/query-execution/datasources
+POST /api/v1/query-execution
+```
+
+前端 Text2SQL 页面只有在以下条件全部满足时才显示可执行操作：
+
+1. 生成 SQL 已通过静态校验；
+2. 后端执行能力显式启用；
+3. 白名单数据源可用。
+
+即使前端允许点击，后端仍会重新执行只读策略和资源限制。
 
 ## 快速开始
-
-### Conda
 
 ```bash
 conda env create -f environment.yml
@@ -139,7 +224,7 @@ conda activate datacopilot
 cp .env.example .env
 ```
 
-在 `.env` 中至少配置：
+至少配置一个可用模型，例如：
 
 ```text
 DEEPSEEK_API_KEY=你的密钥
@@ -151,13 +236,13 @@ DEEPSEEK_API_KEY=你的密钥
 python manage.py start --no-open
 ```
 
-也可以在 Windows 使用：
+Windows 也可使用：
 
 ```bat
 start.cmd
 ```
 
-默认访问地址：
+默认访问：
 
 - Streamlit：`http://127.0.0.1:8502`
 - FastAPI Docs：`http://127.0.0.1:8000/docs`
@@ -168,53 +253,34 @@ start.cmd
 ```bash
 docker compose --env-file docker/.env.production config --quiet
 docker compose --env-file docker/.env.production up -d --build
-docker compose --env-file docker/.env.production logs -f
 ```
 
-可选本地 Ollama：
-
-```bash
-docker compose --profile ollama up -d ollama
-docker compose exec ollama ollama pull qwen3
-```
-
-然后设置：
+生产默认配置保持：
 
 ```text
-LLM_PROVIDER=ollama
-OLLAMA_ENABLED=true
-OLLAMA_MODEL=qwen3
+DATACOPILOT_QUERY_EXECUTION__ENABLED=false
 ```
 
-## 测试与评测
+本地 Ollama 可通过 Compose profile 启用；模型选择只发生在组合根，不侵入 RAG/Text2SQL 业务代码。
 
-运行全量测试：
+## 测试与质量门禁
 
 ```bash
-python -m pytest -q
+python -m compileall -q backend frontend examples/retail_analytics
+docker compose --env-file docker/.env.production config --quiet
+python -m pytest -q --cov=backend --cov=frontend --cov-report=term-missing --cov-fail-under=85
 ```
 
-覆盖率门禁：
-
-```bash
-python -m pytest --cov=backend --cov=frontend --cov-report=term-missing --cov-fail-under=85
-```
-
-离线业务问题集见：
-
-```text
-examples/retail_analytics/questions.json
-```
-
-项目中的 `application/evaluation/` 用于承载 RAG/Text2SQL/Agent 的可量化评测逻辑。实际简历或面试中应只展示你真实跑出的指标，不在 README 中虚构准确率。
+GitHub Actions 对 PR 执行同类门禁。简历和面试中的模型效果数据应来自实际 benchmark 报告，不在 README 中写未经运行验证的准确率。
 
 ## 主要技术栈
 
-- Python 3.11+
+- Python 3.12
 - FastAPI / Pydantic v2 / pydantic-settings
 - LangGraph / LangChain Core
 - ChromaDB / BGE-M3
 - DeepSeek / OpenAI / Ollama / httpx
+- SQLite（可复现只读执行 Demo）
 - Streamlit
 - Docker Compose
 - pytest / pytest-cov / GitHub Actions
@@ -226,14 +292,12 @@ examples/retail_analytics/questions.json
 - [部署指南](docs/DEPLOYMENT.md)
 - [面试讲解](docs/INTERVIEW_GUIDE.md)
 - [路线图](docs/ROADMAP.md)
-- [变更记录](docs/CHANGELOG.md)
 
-## 下一步适合继续做什么
+## 后续成熟化优先级
 
-优先级建议：
-
-1. 增加真实数据库的**只读执行适配器**，带 statement timeout、最大返回行数和审计；
-2. 为 `questions.json` 增加 Execution Accuracy / Valid SQL Rate / Safety Reject Rate 的离线评测脚本；
-3. 增加用户/工作区隔离和 RBAC；
-4. 接入 OpenTelemetry 或 Langfuse/LangSmith 做 LLM trace；
-5. 将 Streamlit 演示层替换为更完整的 Web UI（如果目标岗位偏全栈 AI 应用）。
+1. 数据源 Registry + MySQL / ClickHouse **只读账号适配器**，凭据接入 Secret Manager；
+2. golden SQL / golden result oracle，增加真正的业务结果正确率；
+3. API 鉴权、Workspace / Tenant 隔离、RBAC；
+4. OpenTelemetry + LLM tracing + P95 / error-rate / token-cost dashboard；
+5. 文档摄取异步任务队列、任务状态和失败重试；
+6. 将进程内会话/文档 Registry 替换为 Redis / DB 持久化。
