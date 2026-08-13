@@ -57,6 +57,7 @@ class RuntimeConfigResponse(BaseModel):
     gpu_enabled: bool
     cpu_only: bool
     default_llm_provider: str
+    default_llm_model: str
     embedding_model: str
     vector_store: str
     capabilities: dict[str, bool]
