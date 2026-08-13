@@ -8,6 +8,7 @@ import httpx
 
 
 DEFAULT_BACKEND_URL = "http://backend:8000"
+FRONTEND_API_KEY_ENV = "DATACOPILOT_API_KEY"
 
 
 class BackendClient:
@@ -18,13 +19,17 @@ class BackendClient:
         timeout: float = 60.0,
         http_client: Any | None = None,
         trust_env: bool = False,
+        api_key: str | None = None,
     ) -> None:
         self.base_url = (base_url or os.getenv("BACKEND_URL") or DEFAULT_BACKEND_URL).rstrip("/")
+        resolved_api_key = (api_key or os.getenv(FRONTEND_API_KEY_ENV) or "").strip()
+        headers = {"X-API-Key": resolved_api_key} if resolved_api_key else None
         self._owns_client = http_client is None
         self.client = http_client or httpx.Client(
             base_url=self.base_url,
             timeout=timeout,
             trust_env=trust_env,
+            headers=headers,
         )
 
     def health(self) -> dict[str, Any]:
