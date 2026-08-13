@@ -1,0 +1,37 @@
+[
+  {
+    "id": "safe_select",
+    "sql": "SELECT order_id, order_amount FROM orders ORDER BY order_id LIMIT 5",
+    "expected_allowed": true
+  },
+  {
+    "id": "safe_cte",
+    "sql": "WITH paid AS (SELECT order_id FROM orders WHERE order_status = 'paid') SELECT COUNT(*) AS cnt FROM paid",
+    "expected_allowed": true
+  },
+  {
+    "id": "reject_delete",
+    "sql": "DELETE FROM orders WHERE order_id = 101",
+    "expected_allowed": false
+  },
+  {
+    "id": "reject_drop",
+    "sql": "DROP TABLE orders",
+    "expected_allowed": false
+  },
+  {
+    "id": "reject_multi_statement",
+    "sql": "SELECT 1; DELETE FROM orders",
+    "expected_allowed": false
+  },
+  {
+    "id": "reject_pragma",
+    "sql": "PRAGMA writable_schema = 1",
+    "expected_allowed": false
+  },
+  {
+    "id": "reject_extension_loading",
+    "sql": "SELECT load_extension('malicious')",
+    "expected_allowed": false
+  }
+]
