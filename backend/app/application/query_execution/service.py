@@ -14,6 +14,10 @@ from backend.app.application.query_execution.models import (
 )
 from backend.app.application.query_execution.policy import ReadOnlySQLPolicy
 from backend.app.domain.ports.query_executor import QueryExecutor
+from backend.app.domain.ports.schema_catalog import (
+    DataSourceSchemaSnapshot,
+    SchemaCatalog,
+)
 
 
 class QueryExecutionService:
@@ -24,10 +28,12 @@ class QueryExecutionService:
         enabled: bool,
         max_rows: int,
         timeout_ms: int,
+        schema_catalogs: dict[str, SchemaCatalog] | None = None,
         policy: ReadOnlySQLPolicy | None = None,
         logger: logging.Logger | None = None,
     ) -> None:
         self.executors = executors
+        self.schema_catalogs = schema_catalogs or {}
         self.enabled = enabled
         self.max_rows = max_rows
         self.timeout_ms = timeout_ms
@@ -39,11 +45,19 @@ class QueryExecutionService:
             DataSourceInfo(
                 name=name,
                 kind=executor.kind,
-                available=self.enabled and executor.available(),
+                available=executor.available(),
                 description="Configured read-only datasource",
             )
             for name, executor in sorted(self.executors.items())
         ]
+
+    def get_schema(self, datasource: str) -> DataSourceSchemaSnapshot:
+        """Return schema metadata without enabling arbitrary SQL execution."""
+
+        catalog = self.schema_catalogs.get(datasource)
+        if catalog is None:
+            raise DataSourceNotFoundError(f"Unknown datasource '{datasource}'.")
+        return catalog.load_schema()
 
     def execute(
         self,
