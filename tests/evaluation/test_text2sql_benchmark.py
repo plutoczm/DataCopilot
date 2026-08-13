@@ -1,3 +1,7 @@
+import subprocess
+import sys
+from pathlib import Path
+
 from backend.app.application.evaluation import (
     SafetyPolicyCase,
     SafetyPolicyReport,
@@ -118,3 +122,22 @@ def test_safety_policy_report_tracks_safe_and_unsafe_decisions() -> None:
     assert report.decision_accuracy == 0.6667
     assert report.unsafe_rejection_rate == 0.5
     assert report.safe_acceptance_rate == 1.0
+
+
+def test_benchmark_runner_help_works_as_documented() -> None:
+    project_root = Path.cwd().resolve()
+    result = subprocess.run(
+        [
+            sys.executable,
+            "examples/retail_analytics/evaluate_text2sql.py",
+            "--help",
+        ],
+        cwd=project_root,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "--backend-url" in result.stdout
+    assert "--use-rag" in result.stdout
