@@ -177,7 +177,7 @@ curl http://127.0.0.1:8000/api/v1/query-execution/datasources/retail_demo/schema
 }
 ```
 
-Fingerprint 用于记录本次生成基于哪一版 Schema；它不是授权令牌，也不包含数据库凭据。
+Fingerprint 描述“本次生成基于哪一版 Schema”；它不是授权令牌，也不包含数据库凭据。
 
 ### `POST /api/v1/query-execution`
 
@@ -196,19 +196,28 @@ curl -X POST http://127.0.0.1:8000/api/v1/query-execution \
   -d '{
     "datasource": "retail_demo",
     "sql": "SELECT order_id, order_amount FROM orders ORDER BY order_id LIMIT 20",
-    "max_rows": 20
+    "max_rows": 20,
+    "expected_schema_fingerprint": "<sha256 returned by Text2SQL>"
   }'
 ```
+
+`expected_schema_fingerprint` 可选，但 Datasource Text2SQL 的 UI 和 benchmark 会自动传入。执行服务会在运行 SQL 前重新读取当前 Schema：
+
+- fingerprint 一致：继续执行只读策略与数据库查询；
+- fingerprint 不一致：返回 `409 schema_drift`，要求重新生成和审核 SQL。
+
+这用于防止生成与执行之间发生 Schema drift / TOCTOU。调用方自己提交的人工 SQL 可以不传 fingerprint，但仍必须经过完整只读策略和数据库权限边界。
 
 执行路径包含：
 
 1. execution feature flag；
 2. datasource whitelist；
-3. `ReadOnlySQLPolicy`；
-4. SQLite `mode=ro` + `PRAGMA query_only=ON`；
-5. progress-handler deadline；
-6. server row cap；
-7. Query ID / actor / datasource / SQL SHA-256 / status / latency audit。
+3. 可选 Schema fingerprint precondition；
+4. `ReadOnlySQLPolicy`；
+5. SQLite `mode=ro` + `PRAGMA query_only=ON`；
+6. progress-handler deadline；
+7. server row cap；
+8. Query ID / actor / datasource / SQL SHA-256 / status / latency audit。
 
 常见错误码：
 
@@ -219,6 +228,7 @@ curl -X POST http://127.0.0.1:8000/api/v1/query-execution \
 | `403` | - | role 不满足接口要求 |
 | `404` | `datasource_not_found` | 数据源未配置 |
 | `408` | `query_timeout` | 查询超过 deadline |
+| `409` | `schema_drift` | 当前 Schema 与生成时 fingerprint 不一致 |
 | `503` | `query_execution_disabled` | 执行能力未开启 |
 | `503` | `datasource_unavailable` | 数据源不可用 |
 
@@ -248,11 +258,12 @@ Runner 自身也使用 Datasource 模式，因此评测链路覆盖真实 Schema
 每个零售 case 包含 `golden_sql`。Runner 会：
 
 1. 调用 Text2SQL；
-2. 校验生成 SQL；
-3. 在受治理数据源执行生成 SQL；
-4. 在同一数据源执行 Golden SQL；
-5. 比较结果集；
-6. 输出 `business_result_accuracy`。
+2. 记录生成时 Schema fingerprint；
+3. 校验生成 SQL；
+4. 使用相同 fingerprint precondition 执行生成 SQL；
+5. 在同一 Schema version 上执行 Golden SQL；
+6. 比较结果集；
+7. 输出 `business_result_accuracy`。
 
 报告还区分 generation、validation、execution、table recall、schema hallucination、latency、token 与 safety 指标。`Execution Success` 不等于业务正确率。
 
@@ -273,6 +284,7 @@ data/evaluation/retail_text2sql_report.json
 | `403` | 权限不足 |
 | `404` | 资源或数据源不存在 |
 | `408` | 受治理查询超时 |
+| `409` | Schema precondition 冲突 |
 | `422` | Pydantic 参数校验失败 |
 | `500` | 内部错误 |
 | `502` | LLM Provider 调用失败 |
