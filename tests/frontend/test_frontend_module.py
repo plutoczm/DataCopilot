@@ -58,6 +58,16 @@ class StubHTTPClient:
                     ],
                 }
             )
+        if path == "/api/v1/query-execution/datasources/retail_demo/schema":
+            return StubResponse(
+                {
+                    "datasource": "retail_demo",
+                    "engine": "sqlite",
+                    "schema_context": "CREATE TABLE orders(order_id INTEGER);",
+                    "table_count": 1,
+                    "fingerprint": "a" * 64,
+                }
+            )
         return StubResponse({})
 
     def post(self, path: str, **kwargs):
@@ -143,6 +153,8 @@ def test_backend_client_calls_expected_api_paths() -> None:
     client.query_knowledge("What is AQE?")
     client.text2sql("统计GMV", "hive", "orders(order_id bigint)")
     datasource_config = client.list_query_datasources()
+    datasource_schema = client.get_query_datasource_schema("retail_demo")
+    client.text2sql("统计订单数", datasource="retail_demo")
     query_result = client.execute_query(
         datasource="retail_demo",
         sql="SELECT 1 AS value",
@@ -160,6 +172,7 @@ def test_backend_client_calls_expected_api_paths() -> None:
     assert "/api/v1/knowledge/query" in paths
     assert "/api/v1/text2sql" in paths
     assert "/api/v1/query-execution/datasources" in paths
+    assert "/api/v1/query-execution/datasources/retail_demo/schema" in paths
     assert "/api/v1/query-execution" in paths
     assert "/api/v1/sql-review" in paths
     assert "/api/v1/warehouse-design" in paths
@@ -167,6 +180,7 @@ def test_backend_client_calls_expected_api_paths() -> None:
     assert "/api/v1/agent/chat/stream" in paths
     assert "/api/v1/chat/stream" in paths
     assert datasource_config["execution_enabled"] is True
+    assert datasource_schema["table_count"] == 1
     assert query_result["query_id"] == "query-1"
     assert chunks[0]["event"] == "token"
     assert chunks[0]["data"]["text"] == "hello"
@@ -325,7 +339,7 @@ def test_frontend_pages_use_chinese_display_text() -> None:
             "生成 SQL",
             "一键示例",
             "受控只读执行",
-            "白名单只读数据源",
+            "Schema 来源",
         ],
         "frontend/pages/sql_review.py": ["SQL 审查", "风险等级", "优化建议", "一键示例"],
         "frontend/pages/warehouse_design.py": ["数仓设计", "业务需求", "生成数仓方案", "一键示例"],
