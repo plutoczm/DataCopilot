@@ -15,7 +15,10 @@ router = APIRouter(prefix="/api/v1/text2sql", tags=["Text2SQL"])
     "",
     response_model=Text2SQLResponse,
     summary="根据自然语言生成 SQL",
-    description="为 MySQL、Hive、Spark SQL 或 ClickHouse 生成经过校验的 SQL。",
+    description=(
+        "支持手工 Schema 或已配置 datasource。选择 datasource 时服务端会自动发现"
+        "表结构并绑定对应 SQL 引擎，再执行确定性 SQL 校验。"
+    ),
 )
 async def generate_text2sql(
     request: Text2SQLRequest,
@@ -25,6 +28,7 @@ async def generate_text2sql(
         question=request.question,
         engine=request.engine,
         schema_context=request.schema_context,
+        datasource=request.datasource,
         database_name=request.database_name,
         use_rag=request.use_rag,
         rag_collection_name=request.rag_collection_name,
