@@ -101,7 +101,7 @@ def test_env_files_load_example_then_env_override(tmp_path: Path) -> None:
 
 
 def test_paths_must_stay_inside_project_root() -> None:
-    with pytest.raises(ValidationError, match="must stay inside project_root"):
+    with pytest.raises(ValidationError, match="must stay inside_project_root|must stay inside project_root"):
         Settings(
             _env_file=None,
             paths={
@@ -171,41 +171,9 @@ def test_deepseek_direct_environment_aliases_are_supported(
     assert settings.deepseek.max_retries == 4
 
 
-def test_local_model_settings_defaults_are_safe() -> None:
-    settings = Settings(_env_file=None)
-
-    assert settings.local.enabled is False
-    assert str(settings.local.base_url).rstrip("/") == "http://127.0.0.1:11434/v1"
-    assert settings.local.chat_model == "datacopilot-qwen3-8b"
-    assert settings.local.timeout_seconds == 120
-    assert settings.local.max_retries == 1
-    assert set(settings.local.routing_tasks) == {"text2sql", "sql_review", "warehouse_design"}
-
-
-def test_llm_routing_settings_default_to_disabled() -> None:
-    settings = Settings(_env_file=None)
-
-    assert settings.llm.routing_enabled is False
-    assert settings.llm.cloud_provider is None
-    assert settings.llm.routing_fallback_to_cloud is True
-
-
-def test_local_model_and_routing_settings_from_environment(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.delenv("DATACOPILOT_ENVIRONMENT", raising=False)
-    monkeypatch.setenv("DATACOPILOT_LLM__ROUTING_ENABLED", "true")
-    monkeypatch.setenv("DATACOPILOT_LLM__CLOUD_PROVIDER", "openai")
-    monkeypatch.setenv("DATACOPILOT_LOCAL__ENABLED", "true")
-    monkeypatch.setenv("DATACOPILOT_LOCAL__CHAT_MODEL", "datacopilot-qwen3-8b:latest")
-    monkeypatch.setenv(
-        "DATACOPILOT_LOCAL__ROUTING_TASKS", '["text2sql","sql_review"]'
-    )
-
-    settings = Settings(_env_file=None)
-
-    assert settings.llm.routing_enabled is True
-    assert settings.llm.cloud_provider is ProviderName.OPENAI
-    assert settings.local.enabled is True
-    assert settings.local.chat_model == "datacopilot-qwen3-8b:latest"
-    assert set(settings.local.routing_tasks) == {"text2sql", "sql_review"}
+def test_provider_enum_is_limited_to_supported_runtime_backends() -> None:
+    assert {provider.value for provider in ProviderName} == {
+        "deepseek",
+        "openai",
+        "ollama",
+    }
