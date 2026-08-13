@@ -6,7 +6,15 @@ from backend.app.application.evaluation.quality_gate import (
 
 def _report() -> dict:
     return {
+        "metadata": {
+            "datasource": "retail_demo",
+            "use_rag": False,
+            "schema_source": "datasource",
+            "schema_drift_precondition": True,
+            "result_oracle": "golden_sql_result_set",
+        },
         "text2sql": {
+            "case_count": 5,
             "generation_success_rate": 1.0,
             "valid_sql_rate": 0.8,
             "business_result_accuracy": 0.8,
@@ -111,3 +119,37 @@ def test_quality_gate_rejects_baseline_regression_and_schema_increase() -> None:
     assert any("valid_sql_rate regressed" in failure for failure in result.failures)
     assert any("business_result_accuracy regressed" in failure for failure in result.failures)
     assert any("schema_hallucination_rate regressed" in failure for failure in result.failures)
+
+
+def test_quality_gate_rejects_incompatible_baseline_metadata() -> None:
+    baseline = _report()
+    candidate = _report()
+    candidate["metadata"]["datasource"] = "another_datasource"
+    candidate["metadata"]["use_rag"] = True
+
+    result = evaluate_benchmark_report(
+        candidate,
+        BenchmarkThresholds(),
+        baseline_report=baseline,
+    )
+
+    assert result.passed is False
+    assert any("metadata.datasource" in failure for failure in result.failures)
+    assert any("metadata.use_rag" in failure for failure in result.failures)
+
+
+def test_quality_gate_rejects_case_count_drift() -> None:
+    baseline = _report()
+    candidate = _report()
+    candidate["text2sql"]["case_count"] = 6
+    candidate["safety"]["case_count"] = 5
+
+    result = evaluate_benchmark_report(
+        candidate,
+        BenchmarkThresholds(),
+        baseline_report=baseline,
+    )
+
+    assert result.passed is False
+    assert any("text2sql.case_count" in failure for failure in result.failures)
+    assert any("safety.case_count" in failure for failure in result.failures)
