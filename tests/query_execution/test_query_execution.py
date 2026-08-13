@@ -11,6 +11,7 @@ from backend.app.application.query_execution.exceptions import (
     DataSourceUnavailableError,
     QueryExecutionDisabledError,
     QueryRejectedError,
+    SchemaDriftError,
 )
 from backend.app.application.query_execution.policy import ReadOnlySQLPolicy
 from backend.app.application.query_execution.service import QueryExecutionService
@@ -140,14 +141,43 @@ def test_sqlite_executor_is_read_only_and_enforces_row_cap(tmp_path: Path) -> No
     assert result.elapsed_ms >= 0
 
 
+def test_execution_accepts_matching_schema_fingerprint_and_rejects_drift(
+    tmp_path: Path,
+) -> None:
+    service = make_service(tmp_path)
+    snapshot = service.get_schema("retail_demo")
+
+    ok = service.execute(
+        datasource="retail_demo",
+        sql="SELECT COUNT(*) AS n FROM orders",
+        expected_schema_fingerprint=snapshot.fingerprint,
+    )
+    assert ok.row_count == 1
+
+    executor = service.executors["retail_demo"]
+    assert isinstance(executor, SQLiteReadOnlyExecutor)
+    connection = sqlite3.connect(executor.database_path)
+    try:
+        connection.execute("CREATE TABLE customers(customer_id INTEGER PRIMARY KEY)")
+        connection.commit()
+    finally:
+        connection.close()
+
+    current = service.get_schema("retail_demo")
+    assert current.fingerprint != snapshot.fingerprint
+    with pytest.raises(SchemaDriftError, match="Regenerate and review"):
+        service.execute(
+            datasource="retail_demo",
+            sql="SELECT COUNT(*) AS n FROM orders",
+            expected_schema_fingerprint=snapshot.fingerprint,
+        )
+
+
 def test_service_rejects_dangerous_sql_before_database_execution(tmp_path: Path) -> None:
     service = make_service(tmp_path)
 
     with pytest.raises(QueryRejectedError, match="prohibited_delete"):
-        service.execute(
-            datasource="retail_demo",
-            sql="DELETE FROM orders",
-        )
+        service.execute(datasource="retail_demo", sql="DELETE FROM orders")
 
 
 def test_service_reports_disabled_unknown_and_unavailable_datasources(
@@ -205,6 +235,7 @@ def test_query_execution_api_returns_datasources_schema_and_rows(tmp_path: Path)
             "datasource": "retail_demo",
             "sql": "SELECT order_id, amount FROM orders ORDER BY order_id",
             "max_rows": 1,
+            "expected_schema_fingerprint": schema_payload["fingerprint"],
         },
     )
     assert response.status_code == 200, response.text
@@ -215,7 +246,7 @@ def test_query_execution_api_returns_datasources_schema_and_rows(tmp_path: Path)
     assert response.headers["x-request-id"]
 
 
-def test_query_execution_api_maps_policy_errors_to_client_error(tmp_path: Path) -> None:
+def test_query_execution_api_returns_conflict_on_schema_drift(tmp_path: Path) -> None:
     service = make_service(tmp_path)
     app = create_app()
     app.dependency_overrides[get_query_execution_service] = lambda: service
@@ -225,8 +256,33 @@ def test_query_execution_api_maps_policy_errors_to_client_error(tmp_path: Path) 
         "/api/v1/query-execution",
         json={
             "datasource": "retail_demo",
-            "sql": "DROP TABLE orders",
+            "sql": "SELECT COUNT(*) AS n FROM orders",
+            "expected_schema_fingerprint": "0" * 64,
         },
+    )
+    assert response.status_code == 409, response.text
+    assert response.json()["error"]["code"] == "schema_drift"
+
+    invalid = client.post(
+        "/api/v1/query-execution",
+        json={
+            "datasource": "retail_demo",
+            "sql": "SELECT 1",
+            "expected_schema_fingerprint": "not-a-sha256",
+        },
+    )
+    assert invalid.status_code == 422
+
+
+def test_query_execution_api_maps_policy_errors_to_client_error(tmp_path: Path) -> None:
+    service = make_service(tmp_path)
+    app = create_app()
+    app.dependency_overrides[get_query_execution_service] = lambda: service
+    client = TestClient(app, raise_server_exceptions=False)
+
+    response = client.post(
+        "/api/v1/query-execution",
+        json={"datasource": "retail_demo", "sql": "DROP TABLE orders"},
     )
 
     assert response.status_code == 400, response.text
