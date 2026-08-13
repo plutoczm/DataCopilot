@@ -130,20 +130,14 @@ async def query_knowledge(
     request: KnowledgeQueryRequest,
     rag_service: RAGService = Depends(get_rag_service),
 ) -> KnowledgeQueryResponse:
-    kwargs = {
-        "collection_name": request.collection_name,
-        "top_k": request.top_k,
-        "metadata_filter": request.metadata_filter,
-        "score_threshold": request.score_threshold,
-        "retrieval_mode": request.retrieval_mode,
-    }
-    try:
-        response = await rag_service.answer(request.question, **kwargs)
-    except TypeError as exc:
-        if "unexpected keyword argument 'retrieval_mode'" not in str(exc):
-            raise
-        kwargs.pop("retrieval_mode")
-        response = await rag_service.answer(request.question, **kwargs)
+    response = await rag_service.answer(
+        request.question,
+        collection_name=request.collection_name,
+        top_k=request.top_k,
+        metadata_filter=request.metadata_filter,
+        score_threshold=request.score_threshold,
+        retrieval_mode=request.retrieval_mode,
+    )
     return KnowledgeQueryResponse(
         answer=response.answer,
         citations=response.citations,
