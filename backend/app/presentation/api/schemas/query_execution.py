@@ -24,3 +24,11 @@ class QueryExecutionResponse(BaseModel):
 class DataSourceListResponse(BaseModel):
     execution_enabled: bool
     datasources: list[DataSourceInfo]
+
+
+class DataSourceSchemaResponse(BaseModel):
+    datasource: str
+    engine: str
+    schema_context: str
+    table_count: int = Field(ge=0)
+    fingerprint: str
