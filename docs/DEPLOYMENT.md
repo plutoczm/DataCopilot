@@ -2,80 +2,67 @@
 
 ## 环境要求
 
-- 本地开发：Python 3.11+、Conda。
-- Docker 部署：Docker Engine 24+、Docker Compose v2。
-- 推荐生产系统：Ubuntu 22.04 或更新版本。
-- 默认端口：后端 `8000`、前端 `8501`、ChromaDB `8001`、Ollama `11434`。
+- Python 3.12；
+- 本地推荐 Conda；
+- Docker Engine 24+ / Docker Compose v2；
+- 推荐 Linux：Ubuntu 22.04+；
+- 默认端口：backend `8000`、frontend `8501`、ChromaDB `8001`、Ollama `11434`。
 
 ## 本地启动
 
-在 Windows 上：
+```bash
+conda env create -f environment.yml
+conda activate datacopilot
+cp .env.example .env
+python manage.py start --no-open
+```
+
+Windows 可使用：
 
 ```bat
 start.cmd
 ```
 
-跨平台：
+默认：
 
-```bash
-conda env create -f environment.yml
-conda activate datacopilot
-python manage.py start --no-open
-```
+- Streamlit：`http://127.0.0.1:8502`
+- FastAPI：`http://127.0.0.1:8000/docs`
 
-默认本地工作台使用 `http://127.0.0.1:8502`，API 文档使用 `http://127.0.0.1:8000/docs`。
-
-停止服务：
+停止：
 
 ```bash
 python manage.py stop
 ```
 
-## Docker 部署
+## 模型 Provider
 
-1. 准备生产环境变量：
+运行时只选择一个主 Provider：`deepseek`、`openai` 或 `ollama`。模型选择发生在后端组合根，不存在任务级 local/cloud Routing Provider。
 
-```bash
-cp docker/.env.production.example docker/.env.production
+### DeepSeek
+
+```text
+DATACOPILOT_LLM__DEFAULT_PROVIDER=deepseek
+DEEPSEEK_API_KEY=...
+DEEPSEEK_BASE_URL=https://api.deepseek.com/v1
+DEEPSEEK_MODEL=deepseek-chat
 ```
 
-如果仓库没有示例文件，可直接编辑现有 `docker/.env.production`。至少配置 `DEEPSEEK_API_KEY`，且不要将真实密钥提交到 Git。
+### OpenAI
 
-2. 校验配置：
-
-```bash
-docker compose --env-file docker/.env.production config --quiet
+```text
+DATACOPILOT_LLM__DEFAULT_PROVIDER=openai
+DATACOPILOT_OPENAI__ENABLED=true
+DATACOPILOT_OPENAI__API_KEY=...
+DATACOPILOT_OPENAI__BASE_URL=https://api.openai.com/v1
+DATACOPILOT_OPENAI__CHAT_MODEL=gpt-4.1-mini
 ```
 
-3. 构建并启动：
-
-```bash
-docker compose --env-file docker/.env.production up -d --build
-```
-
-4. 查看状态和日志：
-
-```bash
-docker compose ps
-docker compose logs -f backend frontend chromadb
-```
-
-5. 停止服务：
-
-```bash
-docker compose down
-```
-
-`down` 不会删除绑定到项目 `data/` 目录的数据。不要使用 `down -v` 删除仍需保留的数据卷。
-
-## 使用 Ollama 本地模型
+### Ollama
 
 ```bash
 docker compose --profile ollama up -d ollama
 docker compose exec ollama ollama pull qwen3
 ```
-
-设置以下变量后启动完整服务：
 
 ```text
 LLM_PROVIDER=ollama
@@ -84,56 +71,133 @@ OLLAMA_BASE_URL=http://ollama:11434
 OLLAMA_MODEL=qwen3
 ```
 
-```bash
-docker compose --profile ollama up -d
-```
+不要配置已经删除的 `ROUTING_ENABLED`、`LOCAL_MODEL_ENABLED`、`DATACOPILOT_LOCAL__*` 等变量。
 
-Ollama 健康检查不仅验证服务可达，还会验证目标模型是否已经拉取。
+## Docker 部署
 
-### 多 LLM 智能路由（专业任务 → 本地微调模型）
-
-在本地完成 LoRA 微调并导出 GGUF 后（见 `training/README.md`），将模型导入 Ollama：
+1. 编辑 `docker/.env.production`，真实密钥只放环境或 Secret Store；
+2. 校验：
 
 ```bash
-ollama create datacopilot-qwen3-8b -f training/export/Modelfile
+docker compose --env-file docker/.env.production config --quiet
 ```
 
-开启智能路由，让 Text2SQL、SQL 审核、数仓设计等专业数据工程任务走本地微调模型，通用对话继续走云端：
+3. 启动：
+
+```bash
+docker compose --env-file docker/.env.production up -d --build
+```
+
+4. 查看：
+
+```bash
+docker compose ps
+docker compose logs -f backend frontend chromadb
+```
+
+5. 停止：
+
+```bash
+docker compose down
+```
+
+`data/` 使用项目内 bind mount，`docker compose down` 不应删除这些宿主数据。
+
+## 只读查询执行：默认关闭
+
+生产默认值：
 
 ```text
-ROUTING_ENABLED=true
-CLOUD_PROVIDER=deepseek
-LOCAL_MODEL_ENABLED=true
-LOCAL_MODEL_BASE_URL=http://ollama:11434/v1
-LOCAL_MODEL_NAME=datacopilot-qwen3-8b
+DATACOPILOT_QUERY_EXECUTION__ENABLED=false
+DATACOPILOT_QUERY_EXECUTION__DATASOURCE_NAME=retail_demo
+DATACOPILOT_QUERY_EXECUTION__SQLITE_PATH=data/demo/retail_analytics.db
+DATACOPILOT_QUERY_EXECUTION__MAX_ROWS=200
+DATACOPILOT_QUERY_EXECUTION__TIMEOUT_MS=3000
 ```
 
-本地模型未导入或 Ollama 不可用时，专业任务自动降级到云端，不会中断服务。关闭 `ROUTING_ENABLED` 即回退为单一 provider 模式。本地开发环境对应的环境变量前缀为 `DATACOPILOT_LLM__ROUTING_*` 与 `DATACOPILOT_LOCAL__*`。
+SQLite 适配器用于**本地可复现演示**，不是生产数仓连接方案。
+
+本地演示：
+
+```bash
+python examples/retail_analytics/setup_demo_db.py --force
+```
+
+然后仅在本地 `.env` 显式开启：
+
+```text
+DATACOPILOT_QUERY_EXECUTION__ENABLED=true
+```
+
+再启动应用。执行路径会叠加：
+
+- datasource whitelist；
+- ReadOnlySQLPolicy；
+- SQLite URI `mode=ro`；
+- `PRAGMA query_only=ON`；
+- query deadline；
+- server max rows；
+- query audit。
+
+### 生产数据库接入要求
+
+未来接 MySQL / ClickHouse 时，至少需要：
+
+1. 每个环境独立只读账号；
+2. Secret Manager / Vault / KMS，不把 DSN 写入仓库；
+3. 数据源和 Schema 白名单；
+4. statement/query timeout；
+5. 最大返回行数和 payload size；
+6. 并发限制 / 资源组 / 最大扫描量；
+7. Query ID、调用者、数据源、SQL hash、耗时、结果规模审计；
+8. 敏感表/字段授权与脱敏；
+9. 必要时人工确认。
+
+应用层 ReadOnlySQLPolicy 不能替代数据库权限。
+
+## 零售 Demo 与 Benchmark
+
+```bash
+python examples/retail_analytics/setup_demo_db.py --force
+python manage.py start --no-open
+python examples/retail_analytics/run_demo.py
+python examples/retail_analytics/evaluate_text2sql.py
+```
+
+报告默认写入：
+
+```text
+data/evaluation/retail_text2sql_report.json
+```
+
+报告包含生成、校验、执行、Schema 幻觉、P95 延迟、Token 和 Safety 指标。运行结果属于当前模型/配置/数据集，不提交一个静态“宣传准确率”替代真实 benchmark。
 
 ## 服务与资源限制
 
-| 服务 | 默认端口 | 主要职责 | 默认资源上限 |
+| 服务 | 默认端口 | 职责 | Compose 资源上限 |
 | --- | --- | --- | --- |
-| `backend` | 8000 | FastAPI、Agent、RAG、SQL、数仓 | 4 CPU / 8 GB |
-| `frontend` | 8501 | Streamlit 工作台 | 1 CPU / 2 GB |
-| `chromadb` | 8001 | 向量持久化和检索 | 2 CPU / 4 GB |
-| `ollama` | 11434 | 可选本地模型推理 | 4 CPU / 8 GB |
+| backend | 8000 | API / Agent / RAG / SQL / Query Execution | 4 CPU / 8 GB |
+| frontend | 8501 | Streamlit | 1 CPU / 2 GB |
+| chromadb | 8001 | 向量检索 | 2 CPU / 4 GB |
+| ollama | 11434 | 可选本地 LLM | 4 CPU / 8 GB |
 
-本地大模型实际内存需求取决于模型规模和量化方式，应根据机器资源调整 Compose 限制。
+Compose `deploy.resources` 之外还配置 `cpus` / `mem_limit` 以适配常见 Compose 运行方式。
 
 ## 持久化目录
 
 ```text
-data/chromadb/     ChromaDB 数据
-data/uploads/      已摄取文档
-data/logs/         后端和前端日志
-data/cache/        缓存
-data/embeddings/   Embedding 缓存
-data/ollama/       Ollama 模型
-models/            项目本地模型
+data/chromadb/      向量数据
+data/uploads/       上传文档
+data/logs/          结构化日志
+data/cache/         缓存
+data/embeddings/    Embedding 相关缓存
+data/ollama/        Ollama 模型数据
+data/demo/          本地演示数据库（运行时生成）
+data/evaluation/    Benchmark 报告（运行时生成）
+models/             项目本地模型目录
 ```
 
-生产环境需要定期备份 `data/chromadb`、`data/uploads` 和业务需要的模型目录，并验证恢复流程。
+Demo DB 和 benchmark report 属于可重建运行时数据，不应当作源代码提交。
 
 ## 健康检查
 
@@ -143,42 +207,45 @@ curl http://127.0.0.1:8501/_stcore/health
 curl http://127.0.0.1:8001/api/v1/heartbeat
 ```
 
-后端 `status=degraded` 时查看响应中的 `llm_provider` 和 `vector_store`。默认知识库集合会在首次访问时幂等创建。
+执行能力状态可查看：
+
+```bash
+curl http://127.0.0.1:8000/api/v1/query-execution/datasources
+```
+
+这个接口只暴露非敏感 datasource name/type/availability，不暴露本地 path 或未来数据库凭据。
 
 ## 常见故障
 
-### 端口已占用
+### Query Execution 返回 503
 
-在 `.env.production` 中调整：
+- `query_execution_disabled`：默认安全行为，检查是否确实需要开启；
+- `datasource_unavailable`：本地 demo DB 是否已经初始化；
+- 不要为了消除 503 自动将 production 默认值改成 true。
 
-```text
-BACKEND_PORT=18000
-FRONTEND_PORT=18501
-CHROMADB_PORT=18001
-OLLAMA_PORT=11434
-```
+### Query Execution 返回 400
 
-### Docker 目录权限不足
+`query_rejected` 表示后端只读策略拒绝 SQL。不要在前端绕过策略或改为直接数据库连接。
 
-确保容器 UID/GID 对 `data/` 目录具备读写权限。不要通过给整个项目设置无限制权限来规避问题。
+### LLM 调用失败
 
-### 大模型调用失败
-
-- DeepSeek：检查密钥、代理、Base URL、429 限流和超时。
-- Ollama：检查服务、模型是否拉取，以及后端是否使用容器内地址 `http://ollama:11434`。
-- 查看 `data/logs/backend.log` 中的 request ID 和异常类型。
+- 检查 Provider 选择和密钥；
+- 检查 Base URL、429、网络和 timeout；
+- Ollama 检查模型是否已经 pull。
 
 ### 知识库无结果
 
-- 确认文档摄取成功且集合名一致。
-- 检查元数据过滤条件。
-- 暂时降低 `score_threshold` 比较结果。
-- 使用 `retrieval_mode=hybrid` 改善关键词召回。
+- 检查摄取是否成功、collection 是否一致；
+- 检查 metadata filter；
+- 对比 hybrid/vector retrieval；
+- 不应简单把 score threshold 永久调低来掩盖召回问题。
 
-## 生产安全
+## 生产安全清单
 
-- 使用 Nginx、Traefik 或云网关配置 TLS、认证和限流。
-- 密钥使用 Secret Manager 或容器 Secret，不写入镜像和仓库。
-- 为上传文件设置大小、类型、病毒扫描和租户隔离。
-- SQL 执行必须使用只读账户、超时、行数限制和人工确认。
-- 配置集中日志、指标、调用链和告警。
+- API Gateway / Nginx / Cloud LB：TLS、认证、限流；
+- Secret Manager：模型/数据库凭据；
+- 上传文件：大小、MIME、病毒扫描、租户隔离；
+- 数据库：只读角色、白名单、超时、资源限制、审计；
+- 可观测：集中日志、metrics、trace、告警；
+- 数据持久化：备份和恢复演练；
+- 下一阶段需要补充 App-level Auth、RBAC、Workspace/Tenant isolation。
