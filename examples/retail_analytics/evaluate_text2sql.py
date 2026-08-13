@@ -91,11 +91,12 @@ def main() -> None:
             "execution_ready": execution_ready,
             "use_rag": args.use_rag,
             "schema_source": "datasource",
+            "schema_drift_precondition": True,
             "result_oracle": "golden_sql_result_set",
             "note": (
                 "business_result_accuracy compares generated query rows with golden SQL rows. "
-                "The compact retail oracle ignores row order and column aliases, and should be "
-                "replaced by case-specific domain oracles for more complex production queries."
+                "Generated and golden execution are bound to the Schema fingerprint returned "
+                "by Text2SQL, so benchmark cases fail instead of running across schema drift."
             ),
         },
         "text2sql": text_report.model_dump(),
@@ -162,6 +163,9 @@ def _run_text2sql_case(
     sql = str(payload.get("sql", ""))
     validation_passed = bool(payload.get("validation", {}).get("is_valid"))
     tokens = int(payload.get("token_usage", {}).get("total_tokens", 0) or 0)
+    schema_fingerprint = str(
+        payload.get("metadata", {}).get("schema_fingerprint", "")
+    ).strip()
     result = Text2SQLBenchmarkCase(
         case_id=item["id"],
         generation_succeeded=True,
@@ -176,9 +180,16 @@ def _run_text2sql_case(
 
     if execution_ready and validation_passed:
         execution_started = time.perf_counter()
+        execution_payload: dict[str, Any] = {
+            "datasource": datasource,
+            "sql": sql,
+            "max_rows": 200,
+        }
+        if schema_fingerprint:
+            execution_payload["expected_schema_fingerprint"] = schema_fingerprint
         execution = client.post(
             f"{backend_url}/api/v1/query-execution",
-            json={"datasource": datasource, "sql": sql, "max_rows": 200},
+            json=execution_payload,
         )
         result.execution_attempted = True
         result.execution_latency_ms = _elapsed_ms(execution_started)
@@ -188,13 +199,16 @@ def _run_text2sql_case(
             return result
 
         if golden_sql:
+            golden_payload: dict[str, Any] = {
+                "datasource": datasource,
+                "sql": golden_sql,
+                "max_rows": 200,
+            }
+            if schema_fingerprint:
+                golden_payload["expected_schema_fingerprint"] = schema_fingerprint
             golden = client.post(
                 f"{backend_url}/api/v1/query-execution",
-                json={
-                    "datasource": datasource,
-                    "sql": golden_sql,
-                    "max_rows": 200,
-                },
+                json=golden_payload,
             )
             if golden.status_code != 200:
                 result.error = (
