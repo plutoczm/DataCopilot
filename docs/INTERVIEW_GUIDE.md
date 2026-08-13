@@ -27,7 +27,7 @@ DataPilot-AI 是面向企业数据分析场景的 AI Application Copilot。我�
 
 ### 为什么 Schema 要有 fingerprint？
 
-Text2SQL 结果必须知道自己基于哪一版元数据生成。SQLite Catalog 对稳定排序后的 DDL 做 SHA-256，返回 `schema_fingerprint`。它不是安全令牌，而是 provenance：后续可以用于缓存失效、评测复现、审计和 Schema drift 检测。
+Text2SQL 结果必须知道自己基于哪一版元数据生成。SQLite Catalog 对稳定排序后的 DDL 做 SHA-256，返回 `schema_fingerprint`。它首先是 provenance，同时已经参与执行安全：Datasource 模式生成 SQL 后，UI 和 benchmark 会把该 fingerprint 作为执行前置条件回传，执行服务重新读取当前 Schema；如果 fingerprint 已变化，则返回 `409 schema_drift`，要求重新生成和审核 SQL，避免基于旧 Schema 的查询在新结构上盲跑。
 
 ### 为什么删除任务级多模型路由？
 
@@ -52,14 +52,15 @@ LangGraph 用于显式状态和多步骤流程，比如 Text2SQL → Review。�
 1. feature flag 默认关闭；
 2. 仅允许配置 datasource；
 3. API role 至少 analyst；
-4. `ReadOnlySQLPolicy` 二次检查；
-5. 只接受单条 `SELECT/WITH`；
-6. 拒绝 DML/DDL/权限/管理语句、PRAGMA、extension/file loading；
-7. SQLite URI `mode=ro`；
-8. `PRAGMA query_only=ON`；
-9. progress handler 实现 deadline；
-10. 服务端最大返回行数；
-11. Query ID + actor + SQL SHA-256 + 状态/耗时/行数审计。
+4. Datasource Text2SQL 可携带生成时 Schema fingerprint，执行前检查 Schema drift；
+5. `ReadOnlySQLPolicy` 二次检查；
+6. 只接受单条 `SELECT/WITH`；
+7. 拒绝 DML/DDL/权限/管理语句、PRAGMA、extension/file loading；
+8. SQLite URI `mode=ro`；
+9. `PRAGMA query_only=ON`；
+10. progress handler 实现 deadline；
+11. 服务端最大返回行数；
+12. Query ID + actor + SQL SHA-256 + 状态/耗时/行数审计。
 
 应用层规则不能替代数据库权限。真正接 MySQL/ClickHouse 仍需要原生只读账号、Secret Manager、statement timeout、资源组/扫描量和并发限制。
 
@@ -115,7 +116,7 @@ Embedding 在摄取阶段完成；RAG 裁剪上下文；Schema 直接从 Catalog
 
 Execution Success 只说明 SQL 在数据库里没有报错。例如把 `SUM` 写成 `COUNT` 仍可能成功执行，但业务答案完全错误。
 
-零售 benchmark 为每题提供 `golden_sql`。生成 SQL 与 Golden SQL 在同一个受治理数据源执行，然后比较结果集。`business_result_accuracy` 的分母是全部有 Oracle 的 case，所以生成失败、校验失败、执行失败都不会被从指标里排除。
+零售 benchmark 为每题提供 `golden_sql`。生成 SQL 与 Golden SQL 在同一个受治理数据源、同一个 Schema fingerprint precondition 下执行，然后比较结果集。`business_result_accuracy` 的分母是全部有 Oracle 的 case，所以生成失败、校验失败、执行失败都不会被从指标里排除。
 
 当前 Oracle 适合小型聚合：忽略结果行顺序、列别名，并做有限数值精度归一化。复杂查询需要 case-specific oracle，不能宣称存在万能 SQL 等价判断。
 
@@ -150,9 +151,10 @@ Execution Success 只说明 SQL 在数据库里没有报错。例如把 `SUM` �
 4. 打开 Text2SQL 页面选择 `retail_demo`，展示自动 Schema、engine 和 fingerprint；
 5. 输入“统计最近30天各区域GMV”，展示 SQL 与静态校验；
 6. 显式开启只读执行，展示结果、Query ID、row cap；
-7. 提交 `DROP/DELETE/多语句/PRAGMA`，展示 Safety Policy 拒绝；
-8. 运行 `evaluate_text2sql.py`，解释 Execution Success 和 Business Result Accuracy 的差别；
-9. 展示 Docker Compose 和 GitHub Actions quality gate。
+7. 修改演示 Schema 后尝试执行旧 SQL，展示 `409 schema_drift`；
+8. 提交 `DROP/DELETE/多语句/PRAGMA`，展示 Safety Policy 拒绝；
+9. 运行 `evaluate_text2sql.py`，解释 Execution Success 和 Business Result Accuracy 的差别；
+10. 展示 Docker Compose 和 GitHub Actions quality gate。
 
 ## 简历表达建议
 
@@ -162,4 +164,4 @@ Execution Success 只说明 SQL 在数据库里没有报错。例如把 `SUM` �
 
 更有区分度的表达：
 
-> 面向企业数据分析构建 AI Copilot，设计 `SchemaCatalog` 自动发现白名单数据源元数据并记录 Schema fingerprint，将指标知识 RAG、Text2SQL、确定性 SQL 校验与审核组织为可测试工作流；通过独立 `QueryExecutor`、RBAC、数据库只读模式、deadline、row cap 与审计治理模型 SQL，并建立 Golden SQL result oracle 分离评估 SQL 有效率、执行成功率、Schema 幻觉、业务结果准确率、P95 延迟和 Token 成本。
+> 面向企业数据分析构建 AI Copilot，设计 `SchemaCatalog` 自动发现白名单数据源元数据并记录 Schema fingerprint，将指标知识 RAG、Text2SQL、确定性 SQL 校验与审核组织为可测试工作流；通过独立 `QueryExecutor`、RBAC、Schema drift precondition、数据库只读模式、deadline、row cap 与审计治理模型 SQL，并建立 Golden SQL result oracle 分离评估 SQL 有效率、执行成功率、Schema 幻觉、业务结果准确率、P95 延迟和 Token 成本。
