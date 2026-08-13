@@ -84,7 +84,7 @@ def get_llm_provider(settings: Settings = None) -> LLMProvider:
         if resolved.llm.default_provider is ProviderName.OLLAMA:
             _llm_provider = OllamaProvider(resolved)
         elif resolved.llm.default_provider is ProviderName.OPENAI:
-            _llm_provider = OpenAIProvider(config=resolved.openai, provider_name="openai")
+            _llm_provider = OpenAIProvider(config=resolved.openai)
         else:
             _llm_provider = DeepSeekProvider(resolved)
     return _llm_provider
