@@ -2,109 +2,138 @@
 
 ## 30 秒介绍
 
-DataPilot-AI 是面向企业数据分析场景的 AI Application Copilot。用户可以用自然语言查询指标口径、生成 SQL、审核 SQL，并通过 LangGraph 串联多步骤任务。项目重点不是模型训练，而是把 RAG、Text2SQL、确定性安全校验、Agent 编排、API、Docker 和测试组织成一个可部署、可验证的 AI 应用。
+DataPilot-AI 是面向企业数据分析场景的 AI Application Copilot。我把它从“RAG + Text2SQL Demo”收敛成了一条可验证应用链路：**企业指标知识 RAG → Text2SQL → 确定性 SQL 安全校验 → SQL Review → 显式受治理只读执行 → benchmark**。项目同时有 FastAPI、Streamlit、Docker Compose、结构化日志和 GitHub Actions 质量门禁。
 
 ## 业务价值
 
-传统流程通常是：业务提需求 → 数据同学理解指标 → 查表结构 → 写 SQL → 审核风险 → 反复确认。项目尝试把其中重复且规则明确的部分自动化：
+传统流程是：业务提需求 → 查指标口径 → 查 Schema → 写 SQL → 审核 → 执行 → 验证。项目自动化其中规则清晰、可治理的部分：
 
-- RAG 提供指标口径、Schema 文档等企业知识；
-- Text2SQL 把自然语言转成结构化 SQL；
-- SQLValidator 和 SQL Review 对模型输出做确定性校验；
-- LangGraph 负责组合任务，而不是把所有逻辑塞进一个 Prompt；
-- FastAPI、Streamlit、Docker 和 CI 负责把能力变成真正可运行的应用。
+- RAG 统一指标口径和数据规范；
+- Text2SQL 生成候选 SQL；
+- SQLValidator / SQL Review 降低幻觉和风险；
+- Query Execution 对白名单数据源提供显式只读执行；
+- Benchmark 记录生成、校验、执行、幻觉、延迟和 Token，而不是凭感觉说效果好。
 
 ## 核心架构取舍
 
-### 为什么采用分层架构？
+### 为什么采用端口/适配器？
 
-应用层依赖 `LLMProvider` 和 `VectorStore` 端口，DeepSeek、OpenAI、Ollama、ChromaDB 位于基础设施层。这样业务用例可以用 Fake Provider 测试，模型供应商变化时不需要重写 RAG/Text2SQL 核心逻辑。
+应用层只依赖 `LLMProvider`、`VectorStore`、`QueryExecutor`。DeepSeek/OpenAI/Ollama、ChromaDB、SQLite 都在基础设施层。这样可以用 Fake 实现做测试，也能在不修改 Text2SQL 业务逻辑的情况下增加 MySQL/ClickHouse 只读适配器。
 
-### 为什么只保留 DeepSeek / OpenAI / Ollama，而删除任务级多模型路由？
+### 为什么删除任务级多模型路由？
 
-原项目曾加入 `RoutingLLMProvider + TaskBoundLLMProvider`，按 Text2SQL、RAG 等任务选择不同模型。但在没有真实质量、成本或隐私数据证明收益前，这会增加配置、故障路径和测试成本。当前版本把模型选择收敛到应用组合根，业务服务只依赖统一 Provider。
-
-如果未来离线评测证明“某类任务使用特定模型显著更好”，可以重新加入路由，但应由数据驱动，而不是为了展示技术栈。
+没有真实 benchmark 证明收益时，按 RAG/Text2SQL 分配不同模型会增加配置、故障路径和测试面。当前将模型选择收敛到组合根。未来如果质量/成本数据证明某模型在某任务显著更优，再引入路由。
 
 ### 为什么删除微调训练子系统？
 
-目标岗位是 AI 应用开发。微调属于 Model Engineering，独立训练流水线会稀释主项目的应用主线。对这个场景，企业指标、Schema、规范经常变化，优先用 RAG 注入动态私有知识更合理；真正需要稳定改变模型能力时，再把 LoRA/SFT 做成独立项目更容易讲清楚边界。
+目标是 AI Application Engineering。企业指标、Schema、规范经常变化，这类知识优先 RAG；LoRA/SFT 属于 Model Engineering，放在独立项目里更容易讲清楚训练数据、基线、评测和部署，而不是稀释应用主线。
 
-### 为什么使用 LangGraph？
+### 为什么使用 LangGraph，但不做 Multi-Agent 堆叠？
 
-这里不是因为“Agent 越多越高级”，而是因为部分任务具有明确状态和步骤，例如 Text2SQL → 校验 → SQL Review。LangGraph 能显式表示节点、条件路由、共享状态和终止条件，使路径可测试、可观测。
+LangGraph 用于显式状态和多步骤流程，比如 Text2SQL → Review。节点、路由、状态和终止条件可测试。当前没有业务证据需要多个自治 Agent，因此不增加额外通信、循环和故障复杂度。
 
-### 为什么不让 Agent 直接执行生产 SQL？
+### 为什么不让 Agent 自动执行 SQL？
 
-LLM 输出不应直接拥有生产写权限。当前项目默认只生成、校验和审核 SQL。若以后加入执行器，应使用只读账号、查询超时、最大返回行数、数据源白名单和审计日志。应用层规则只是第一道防线，不能替代数据库权限。
+即使只读查询也会消耗数据库资源，并可能暴露敏感数据。当前执行器已经实现，但它**不注册为 Agent Tool**：用户需要显式点击 UI 或调用 API，后端再做独立安全检查。这比让 Agent 自主决定“什么时候查库”更容易审计和控制。
+
+## 查询执行是怎么做防御纵深的？
+
+当前 SQLite 是可复现演示适配器，不包装成生产方案。执行路径包括：
+
+1. feature flag 默认关闭；
+2. 仅允许配置中的 datasource；
+3. `ReadOnlySQLPolicy` 二次检查；
+4. 只接受单条 `SELECT/WITH`；
+5. 拒绝 DML/DDL/权限/管理语句、PRAGMA、extension/file loading；
+6. SQLite URI `mode=ro`；
+7. `PRAGMA query_only=ON`；
+8. progress handler 实现 deadline；
+9. 服务端最大返回行数；
+10. Query ID + SQL SHA-256 + 状态/耗时/行数审计。
+
+面试时要强调：应用层正则/Parser **不能替代数据库权限**。真正接 MySQL/ClickHouse 还需要只读账号、Secret Manager、statement timeout、资源组/扫描量和并发限制。
 
 ## 高频技术问题
 
-### 1. Agent 如何选择工具？
+### 1. Text2SQL 如何降低幻觉？
 
-当前由意图识别进入 RAG、Text2SQL、SQL Review、数仓设计或通用对话节点；组合任务可以先生成 SQL，再进入审核。工具使用 Pydantic 输入模型和 JSON Schema，路由路径写入状态，便于测试和排错。
+Prompt 只注入允许的 Schema 和可选 RAG 业务上下文；模型 JSON 输出后，SQLValidator 检查未知表/字段、JOIN、笛卡尔积、只读语句和引擎规则。执行阶段还有第二套 ReadOnlySQLPolicy，避免把生成阶段校验当成最终授权。
 
-### 2. 如何降低 RAG 幻觉？
+### 2. 为什么 SQLValidator 和 Query Execution Policy 要两套？
 
-检索阶段使用 Dense + BM25 混合召回、RRF 融合和轻量重排；生成阶段只提供 Top K 上下文并返回引用；低相关度或无候选时拒答。下一步应补答案忠实度和业务问答集的离线评测。
+职责不同：Validator 面向“生成质量”，包含 Schema、JOIN、引擎建议；Execution Policy 面向“运行授权”，必须独立、最小、保守。这样未来 Text2SQL 之外的 SQL 来源也不能绕过执行边界。
 
-### 3. Text2SQL 如何保证安全？
+### 3. 为什么还需要 SQL Review？
 
-安全不是靠 Prompt 里写一句“不要生成危险 SQL”。模型返回 JSON 后会经过确定性 SQLValidator：
+Validator 负责确定性结构/安全规则；Review 负责更高层可读性、风险评分、性能建议和解释。安全核心不能完全依赖 LLM，但规则引擎也不适合承担所有业务语义判断。
 
-- 只接受单条 `SELECT/WITH`；
-- 拒绝 `INSERT/UPDATE/DELETE/DROP/ALTER/TRUNCATE/MERGE/GRANT/...`；
-- 检查未知表和字段；
-- 检查 JOIN 条件和笛卡尔积风险；
-- 对 `SELECT *`、缺少分区过滤等给出提示。
+### 4. RAG 如何降低幻觉？
 
-真正执行生产查询时仍需数据库只读权限和资源限制。
-
-### 4. 为什么还需要 SQL Review？
-
-Validator 适合确定性安全和结构规则；Review 负责更高层的可读性、性能建议和解释。把两者分开可以避免把所有判断交给 LLM，也避免规则引擎承担无法可靠判断的业务语义。
+Dense + BM25 混合召回、RRF 融合、轻量重排；Top K 上下文；引用返回；低分拒答。后续需要 golden Q&A 和忠实度指标，而不是只看向量相似度。
 
 ### 5. 如何管理上下文和记忆？
 
-单次任务使用 `AgentState`；同一 `session_id` 保存最近消息；超出窗口的历史做摘要压缩。当前属于进程内短期记忆，生产长期记忆应使用 Redis/数据库并做租户隔离。
+单次流程用 `AgentState`；同 `session_id` 保存短期消息；超窗口历史做摘要。当前是进程内状态，生产版本应迁移 Redis/数据库，并增加 workspace/tenant 隔离。
 
-### 6. 如何控制延迟和成本？
+### 6. 如何控制成本和延迟？
 
-文档切分和 Embedding 在摄取阶段完成；查询只放入 Top K 片段；确定性安全检查不调用 LLM；流式接口降低等待感知；外部 Provider 设置超时和有限重试。上线后还应记录 P50/P95 延迟、Token 成本和失败率，再决定缓存或模型分级策略。
+Embedding 在摄取阶段完成；RAG 裁剪上下文；安全规则不调用 LLM；Provider 设置 timeout/retry；Benchmark 记录 generation P95 和 Token；查询执行有独立 deadline 和 row cap。优化应由这些数据驱动，而不是先加缓存/多模型路由。
 
-### 7. 如何评估项目，而不是凭感觉说“效果很好”？
+### 7. 现在如何评测 Text2SQL？
 
-按任务拆指标：
+不使用一个笼统“准确率”：
 
-- Agent：Intent Accuracy、Tool Success Rate；
-- RAG：Precision@K、MRR、答案忠实度；
-- Text2SQL：Valid SQL Rate、Execution Accuracy、Schema Hallucination Rate；
-- Safety：Unsafe SQL Reject Rate、False Reject Rate；
-- 工程：P95 Latency、Error Rate、Token/Request。
+- Generation Success Rate；
+- Valid SQL Rate；
+- Execution Success Rate；
+- Expected Table Recall；
+- Schema Hallucination Rate；
+- P95 Generation Latency；
+- Token Usage；
+- Safety Policy Decision Accuracy；
+- Unsafe Rejection Rate / Safe Acceptance Rate。
 
-仓库已有基础 Agent/RAG 指标模型和 `examples/retail_analytics/questions.json` 业务问题集。简历中只应写真实跑出来的数据，不虚构准确率。
+`Execution Success` **不等于业务结果正确率**。真正的业务 Accuracy 要增加 golden SQL/result oracle，比较查询结果语义。
 
-### 8. 为什么用 ChromaDB？
+### 8. 为什么 SQLite 有实际意义？
 
-对于单机演示和实习项目，ChromaDB 部署成本低，能展示持久化向量检索。因为应用层依赖 VectorStore 端口，规模变大后可以迁移 PGVector、Qdrant、Milvus 等，而不改业务用例。
+不是为了证明 SQLite 是生产数仓，而是让招聘者/CI 可以低成本复现“生成 SQL → 实际执行 → 返回数据 → 安全拒绝”的完整链路。生产数据源适配器是下一层 infrastructure adapter，而不是重写应用服务。
 
-### 9. 当前项目离生产还有哪些差距？
+### 9. 为什么 ChromaDB？
 
-主要包括：认证/RBAC、租户隔离、真正的只读数据库执行适配器、在线 tracing/metrics、异步文档摄取任务、生产级数据源连接管理，以及更系统的离线评测集。
+单机演示部署成本低，适合验证 RAG 主链路。`VectorStore` 端口保留了迁移到 PGVector/Qdrant/Milvus 的边界。
 
-面试时主动说出边界通常比把所有未来能力包装成“已经实现”更可信。
+### 10. 当前距离生产还有什么差距？
+
+最重要的不是再加 Agent，而是：
+
+- API Auth / RBAC / Tenant isolation；
+- MySQL/ClickHouse 只读适配器 + Secret Manager；
+- golden result oracle；
+- OpenTelemetry / LLM tracing / metrics dashboard；
+- 异步文档摄取任务；
+- Redis/DB 持久化 session/document registry。
+
+主动说明这些边界比把 Roadmap 写成已实现更可信。
 
 ## Demo 顺序
 
-1. 打开 FastAPI Swagger，先展示健康检查、结构化请求/响应和 API 边界。
-2. 上传 `examples/retail_analytics/metric_definitions.md`，说明 GMV、退款率等口径进入知识库。
-3. 用 `examples/retail_analytics/questions.json` 中的问题生成 SQL，展示 Schema + 可选 RAG 上下文。
-4. 展示 SQLValidator 对危险 SQL、多语句、未知表字段和 JOIN 风险的拒绝/告警。
-5. 展示 Text2SQL → SQL Review 的 LangGraph 路由路径和结果校验。
-6. 最后展示 Docker Compose、健康检查和 GitHub Actions coverage gate，证明项目不是只在 Notebook 中运行。
+1. Swagger：展示健康检查、结构化 Schema、统一错误；
+2. 上传 `metric_definitions.md`，展示指标知识 RAG；
+3. 初始化 `retail_analytics.db`，强调执行默认关闭；
+4. 用零售问题生成 SQLite SQL，展示静态校验；
+5. 显式开启只读执行，展示结果、Query ID、row cap；
+6. 手工提交 `DROP/DELETE/多语句/PRAGMA`，展示 Safety Policy 拒绝；
+7. 展示 Text2SQL → SQL Review 的 LangGraph 路径；
+8. 运行 `evaluate_text2sql.py`，展示真实 benchmark JSON；
+9. 最后展示 Docker Compose 和 GitHub Actions quality gate。
 
-## 简历讲项目时避免的说法
+## 简历表达建议
 
-不要只说“用了 LangChain、LangGraph、RAG、ChromaDB”。更好的表达是：
+不要写：
 
-> 面向企业数据分析场景实现 AI Copilot，将指标知识检索、Text2SQL、SQL 安全校验和审核组织为可测试的 LangGraph 工作流；通过统一 Provider 端口解耦模型供应商，使用 Docker Compose 与 GitHub Actions 完成部署和质量门禁，并构建零售经营问题集用于离线评测。
+> 使用 LangChain、LangGraph、RAG、ChromaDB 构建智能数据助手。
+
+更好的表达：
+
+> 面向企业数据分析构建 AI Copilot，将指标知识 RAG、Text2SQL、确定性 SQL 校验与审核组织为可测试工作流；设计独立 QueryExecutor 端口和默认关闭的只读执行边界，通过白名单、数据库只读模式、查询 deadline、结果行数限制与审计控制模型 SQL 的运行风险，并构建零售 benchmark 分离评估 SQL 有效率、执行成功率、Schema 幻觉、P95 延迟和 Token 成本。
