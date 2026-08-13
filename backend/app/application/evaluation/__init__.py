@@ -6,6 +6,7 @@ from backend.app.application.evaluation.text2sql_benchmark import (
     Text2SQLBenchmarkReport,
     extract_referenced_tables,
     extract_schema_tables,
+    result_rows_equivalent,
 )
 
 __all__ = [
@@ -17,4 +18,5 @@ __all__ = [
     "Text2SQLBenchmarkReport",
     "extract_referenced_tables",
     "extract_schema_tables",
+    "result_rows_equivalent",
 ]
