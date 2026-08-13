@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import sys
@@ -27,6 +28,7 @@ from backend.app.application.evaluation import (  # noqa: E402
 )
 
 
+BENCHMARK_VERSION = "retail-text2sql-v1"
 DEFAULT_REPORT = PROJECT_ROOT / "data" / "evaluation" / "retail_text2sql_report.json"
 
 
@@ -53,6 +55,11 @@ def main() -> None:
     safety_cases = _load_json(args.safety_cases)
     schema_sql = args.schema.read_text(encoding="utf-8")
     allowed_tables = extract_schema_tables(schema_sql)
+    benchmark_identity = _benchmark_identity(
+        questions_path=args.questions,
+        schema_path=args.schema,
+        safety_cases_path=args.safety_cases,
+    )
     headers = {"X-API-Key": args.api_key.strip()} if args.api_key.strip() else None
 
     with httpx.Client(timeout=90.0, headers=headers) as client:
@@ -86,6 +93,7 @@ def main() -> None:
     text_report = Text2SQLBenchmarkReport.from_cases(text_cases)
     payload = {
         "metadata": {
+            **benchmark_identity,
             "backend_url": backend_url,
             "datasource": args.datasource,
             "execution_ready": execution_ready,
@@ -267,6 +275,33 @@ def _execution_ready(
         item.get("name") == datasource and item.get("available") is True
         for item in payload.get("datasources", [])
     )
+
+
+def _benchmark_identity(
+    *,
+    questions_path: Path,
+    schema_path: Path,
+    safety_cases_path: Path,
+) -> dict[str, str]:
+    identity = {
+        "benchmark_version": BENCHMARK_VERSION,
+        "questions_sha256": _sha256_file(questions_path),
+        "schema_sha256": _sha256_file(schema_path),
+        "safety_cases_sha256": _sha256_file(safety_cases_path),
+    }
+    canonical = json.dumps(identity, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return {
+        **identity,
+        "benchmark_fingerprint": hashlib.sha256(canonical).hexdigest(),
+    }
+
+
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as source:
+        for chunk in iter(lambda: source.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def _load_json(path: Path) -> list[dict[str, Any]]:
