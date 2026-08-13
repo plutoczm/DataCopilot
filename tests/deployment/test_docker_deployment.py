@@ -35,6 +35,25 @@ def test_compose_backend_exposes_only_supported_provider_env_passthrough() -> No
     assert "DATACOPILOT_LOCAL__ENABLED" not in backend_env
 
 
+def test_compose_query_execution_defaults_to_disabled_and_bounded() -> None:
+    compose = load_compose()
+    backend_env = compose["x-backend-env"]
+
+    assert backend_env["DATACOPILOT_QUERY_EXECUTION__ENABLED"] == "${QUERY_EXECUTION_ENABLED:-false}"
+    assert backend_env["DATACOPILOT_QUERY_EXECUTION__DATASOURCE_NAME"] == (
+        "${QUERY_EXECUTION_DATASOURCE:-retail_demo}"
+    )
+    assert backend_env["DATACOPILOT_QUERY_EXECUTION__SQLITE_PATH"].startswith(
+        "${QUERY_EXECUTION_SQLITE_PATH:-data/demo/"
+    )
+    assert backend_env["DATACOPILOT_QUERY_EXECUTION__MAX_ROWS"] == (
+        "${QUERY_EXECUTION_MAX_ROWS:-200}"
+    )
+    assert backend_env["DATACOPILOT_QUERY_EXECUTION__TIMEOUT_MS"] == (
+        "${QUERY_EXECUTION_TIMEOUT_MS:-3000}"
+    )
+
+
 def test_compose_uses_only_project_local_bind_mounts_and_no_anonymous_volumes() -> None:
     compose = load_compose()
 
@@ -97,6 +116,9 @@ def test_production_env_file_sets_safe_runtime_defaults_without_secrets() -> Non
     assert "DATACOPILOT_PATHS__PROJECT_ROOT=/app" in content
     assert "DATACOPILOT_PATHS__DATA_DIR=data" in content
     assert "DATACOPILOT_PATHS__MODELS_DIR=models" in content
+    assert "DATACOPILOT_QUERY_EXECUTION__ENABLED=false" in content
+    assert "DATACOPILOT_QUERY_EXECUTION__MAX_ROWS=200" in content
+    assert "DATACOPILOT_QUERY_EXECUTION__TIMEOUT_MS=3000" in content
     assert "BACKEND_URL=http://backend:8000" in content
     assert "DEEPSEEK_API_KEY=" in content
     assert "sk-" not in content.lower()
@@ -110,6 +132,7 @@ def test_env_example_does_not_set_legacy_or_removed_provider_variables() -> None
     assert "CHROMA_PERSIST_DIRECTORY" not in content
     assert "DATACOPILOT_LOCAL__" not in content
     assert "DATACOPILOT_LLM__ROUTING_" not in content
+    assert "DATACOPILOT_QUERY_EXECUTION__ENABLED=false" in content
     assert "sk-" not in content.lower()
 
 
