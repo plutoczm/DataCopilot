@@ -166,3 +166,29 @@ def test_frontend_dockerfile_is_production_optimized() -> None:
     assert "HEALTHCHECK" in content
     assert "streamlit" in content
     assert "EXPOSE 8501" in content
+
+
+def test_ci_workflow_enforces_dependency_integrity_and_resource_bounds() -> None:
+    workflow = yaml.safe_load(Path(".github/workflows/test.yml").read_text(encoding="utf-8"))
+    quality = workflow["jobs"]["quality"]
+    steps = {step["name"]: step for step in quality["steps"]}
+
+    assert workflow["permissions"] == {"contents": "read"}
+    assert workflow["concurrency"]["cancel-in-progress"] is True
+    assert quality["timeout-minutes"] == 15
+    assert steps["Checkout"]["uses"] == "actions/checkout@v6"
+    assert steps["Set up Python"]["uses"] == "actions/setup-python@v6"
+    assert "python -m pip check" in steps["Install dependencies"]["run"]
+    assert "--cov-fail-under=85" in steps["Run tests and coverage gate"]["run"]
+
+
+def test_dependabot_monitors_python_and_github_actions_dependencies() -> None:
+    config = yaml.safe_load(Path(".github/dependabot.yml").read_text(encoding="utf-8"))
+    updates = {entry["package-ecosystem"]: entry for entry in config["updates"]}
+
+    assert config["version"] == 2
+    assert set(updates) == {"pip", "github-actions"}
+    assert set(updates["pip"]["directories"]) == {"/", "/backend", "/frontend"}
+    assert updates["pip"]["schedule"]["interval"] == "weekly"
+    assert updates["github-actions"]["directory"] == "/"
+    assert updates["github-actions"]["schedule"]["interval"] == "weekly"
