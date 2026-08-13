@@ -1,6 +1,6 @@
 # 系统架构
 
-DataPilot-AI 是面向数据分析与数据工程场景的 AI 应用，采用端口/适配器风格的分层架构。核心原则是：**LLM 负责生成候选结果，确定性代码负责约束和治理，有副作用的能力保持显式边界。**
+DataPilot-AI 是面向数据分析与数据工程场景的 AI 应用。核心原则是：**LLM 负责生成候选结果，确定性代码负责约束和治理，有副作用的能力保持显式边界，质量指标必须能回到可复现数据。**
 
 ## 分层结构
 
@@ -8,48 +8,42 @@ DataPilot-AI 是面向数据分析与数据工程场景的 AI 应用，采用端
 flowchart TB
     Presentation[表现层<br/>FastAPI + Streamlit]
     Application[应用层<br/>RAG / Text2SQL / Review / Query Execution / Agent / Evaluation]
-    Domain[领域层<br/>实体 + LLMProvider / VectorStore / QueryExecutor]
-    Infrastructure[基础设施层<br/>LLM / ChromaDB / Embedding / SQLite Adapter]
+    Domain[领域层<br/>实体 + Ports]
+    Infrastructure[基础设施层<br/>LLM / VectorStore / Registry / Query Adapter]
 
     Presentation --> Application
     Application --> Domain
     Infrastructure --> Domain
-    Presentation -. 组合根 / DI .-> Infrastructure
+    Presentation -. Composition Root / DI .-> Infrastructure
 ```
+
+### 领域端口
+
+应用层依赖四个主要端口：
+
+- `LLMProvider`：隔离 DeepSeek / OpenAI / Ollama；
+- `VectorStore`：隔离 ChromaDB；
+- `QueryExecutor`：隔离 SQLite 及未来 MySQL/ClickHouse 只读执行器；
+- `SchemaCatalog`：隔离数据库/数据平台元数据发现。
+
+`QueryExecutor` 和 `SchemaCatalog` 是不同能力。一个数据源可以允许读取 Schema，但仍禁止执行模型生成 SQL。
 
 ### 表现层
 
-- FastAPI 暴露健康检查、知识库、Agent、Text2SQL、SQL Review、只读查询执行和数仓设计接口；
-- Pydantic v2 提供请求/响应 Schema 和统一错误模型；
-- Streamlit 只通过 HTTP 调用后端，不直接持有数据库连接或模型密钥；
-- Text2SQL UI 只有在 SQL 校验通过、后端执行显式启用且白名单数据源可用时才展示执行入口。
+- FastAPI 暴露健康检查、身份、知识库、Agent、Text2SQL、SQL Review、Schema discovery、只读执行和数仓设计；
+- Pydantic v2 提供请求/响应与统一错误模型；
+- Streamlit 只通过 HTTP 调用后端，不直接持有模型密钥或数据库连接；
+- Text2SQL UI 可选择已配置 datasource，由后端自动发现 Schema；
+- 只有 SQL 校验通过、执行显式启用且数据源可用时，UI 才提供执行入口。
 
 ### 应用层
 
 - **RAG**：摄取、切分、检索、融合、重排、引用、拒答；
-- **Text2SQL**：Prompt、结构化解析、SQLValidator、优化建议；
+- **Text2SQL**：Schema source resolution、Prompt、结构化解析、SQLValidator、优化建议；
 - **SQL Review**：确定性规则、风险评分、可选 LLM 解释；
 - **Query Execution**：ReadOnlySQLPolicy、数据源选择、行数/超时边界、审计；
 - **Agent**：意图识别、工具编排、短期记忆、结果校验；
-- **Evaluation**：Agent 指标、Text2SQL benchmark、安全策略 benchmark。
-
-### 领域层
-
-应用层依赖三个核心端口：
-
-- `LLMProvider`：隔离 DeepSeek/OpenAI/Ollama；
-- `VectorStore`：隔离 ChromaDB；
-- `QueryExecutor`：隔离 SQLite 以及未来 MySQL/ClickHouse 只读执行器。
-
-执行服务不依赖 SQLite，SQLite 只是当前基础设施适配器。
-
-### 基础设施层
-
-- DeepSeek / OpenAI / Ollama Provider；
-- ChromaDB VectorStore；
-- BGE-M3 Embedding；
-- TXT / Markdown / PDF / DOCX Loader；
-- `SQLiteReadOnlyExecutor`：可复现本地只读数据源。
+- **Evaluation**：Agent 指标、Text2SQL benchmark、Golden Result Oracle、安全策略 benchmark。
 
 ## 总体请求链路
 
@@ -57,34 +51,66 @@ flowchart TB
 flowchart LR
     Browser[浏览器] --> UI[Streamlit]
     UI --> API[FastAPI]
-    API --> Agent[LangGraph Agent]
-    API --> ExecuteAPI[Query Execution API]
-    Agent --> RAG[RAG]
-    Agent --> T2S[Text2SQL]
-    Agent --> Review[SQL Review]
+    API --> Catalog[SchemaCatalog]
+    Catalog --> T2S[Text2SQL]
+    KB[RAG / 指标口径] --> T2S
     T2S --> Guard[SQLValidator]
-    Guard --> Review
-    UI -->|显式执行| ExecuteAPI
+    Guard --> Review[SQL Review]
+    UI -->|显式执行| ExecuteAPI[Query Execution API]
     ExecuteAPI --> Policy[ReadOnlySQLPolicy]
     Policy --> QueryPort[QueryExecutor]
     QueryPort --> SQLite[SQLite mode=ro]
-    RAG --> LLMPort[LLMProvider]
-    T2S --> LLMPort
+    SQLite --> Rows[Structured Rows]
+    Rows --> Oracle[Golden Result Oracle]
+    T2S --> LLMPort[LLMProvider]
     Review --> LLMPort
-    LLMPort --> Provider[DeepSeek / OpenAI / Ollama]
-    RAG --> VectorPort[VectorStore]
+    KB --> VectorPort[VectorStore]
     VectorPort --> Chroma[ChromaDB]
 ```
 
-一个重要边界：**Agent 当前不会自主调用 Query Execution。** 数据库执行属于有副作用/资源消耗的操作，即使是只读，也保留为显式 API/UI 动作。
+重要边界：**Agent 不自主调用 Query Execution。** 数据库读取即使无写副作用，也有成本、权限和数据暴露风险，因此保留为用户显式操作。
+
+## Datasource Schema Discovery
+
+手工把 DDL 复制进 Prompt 只适合原型。真实产品需要对 Schema provenance 建模。
+
+```mermaid
+sequenceDiagram
+    participant U as User/UI
+    participant API as FastAPI
+    participant Catalog as SchemaCatalog
+    participant DB as SQLite / Future Catalog
+    participant T2S as Text2SQL
+
+    U->>API: GET datasource schema
+    API->>Catalog: load_schema()
+    Catalog->>DB: read metadata only
+    DB-->>Catalog: table DDL
+    Catalog-->>API: Snapshot + Engine + SHA256 Fingerprint
+    U->>API: POST Text2SQL {datasource, question}
+    API->>T2S: generate()
+    T2S->>Catalog: load_schema()
+    Catalog-->>T2S: same typed snapshot
+    T2S-->>U: SQL + validation + schema provenance
+```
+
+当前 SQLite Adapter 从 `sqlite_schema` 读取用户表，按表名稳定排序并构造 Snapshot。Fingerprint 用来描述“这次生成基于哪一版 Schema”，不承担授权功能。
+
+Datasource 模式约束：
+
+- `datasource` 与 `schema_context` 互斥；
+- 引擎由 datasource 决定；
+- 显式传入不匹配引擎会被拒绝；
+- Schema discovery 不受 SQL execution feature flag 控制；
+- 凭据、文件路径等敏感配置不进入 Schema API 响应。
 
 ## LLM Provider 边界
 
-运行时只选择一个主 Provider，模型选择属于组合根职责。
+运行时只选择一个主 Provider，模型选择属于组合根职责：
 
 ```mermaid
 flowchart LR
-    Settings --> Composition[DI Composition Root]
+    Settings --> Composition[Composition Root]
     Composition --> DeepSeek
     Composition --> OpenAI
     Composition --> Ollama
@@ -94,7 +120,7 @@ flowchart LR
     Port --> Services[RAG / Text2SQL / Review / Agent]
 ```
 
-本分支删除任务级 local/cloud Routing Provider，避免把模型策略扩散到业务服务。未来只有在真实成本/隐私/质量数据证明必要时，才应重新增加模型路由。
+本分支删除任务级 local/cloud Routing Provider。只有当真实 benchmark 证明成本、隐私或质量收益时，才值得重新增加模型路由。
 
 ## RAG 流程
 
@@ -122,41 +148,40 @@ sequenceDiagram
     RAG-->>API: Answer + Citation + Token Usage
 ```
 
-低于阈值或无候选时应拒答，避免模型脱离检索证据补全企业事实。
+低于阈值或无候选时拒答，避免模型脱离检索证据补全企业事实。文档 Registry 使用 SQLite 持久化，避免服务重启后文档目录状态消失。
 
 ## Text2SQL 安全链路
 
 ```mermaid
 flowchart LR
-    NL[自然语言需求] --> Context[Schema + 可选 RAG 指标口径]
+    NL[自然语言需求] --> Source{Schema Source}
+    Source -->|Datasource| Catalog[SchemaCatalog]
+    Source -->|Manual| Manual[Schema Context]
+    Catalog --> Context[Schema + Provenance]
+    Manual --> Context
+    KB[RAG 指标口径] --> Context
     Context --> Prompt[Engine Prompt]
     Prompt --> LLM
     LLM --> Parse[JSON Parse]
     Parse --> Validator[SQLValidator]
     Validator -->|合法| Review[SQL Review]
     Validator -->|非法| Reject[Reject]
-    Review --> Candidate[Candidate SQL]
 ```
 
-`SQLValidator` 是生成阶段的确定性防线：
+`SQLValidator` 负责生成质量和静态安全：单条 `SELECT/WITH`、DML/DDL/权限/管理语句拒绝、未知表/字段、JOIN、笛卡尔积、`SELECT *` 和引擎规则。
 
-- 单条 `SELECT/WITH`；
-- DML/DDL/权限/管理语句拒绝；
-- 未知表/字段检查；
-- JOIN 条件、笛卡尔积、`SELECT *`、引擎规则检查。
-
-它不被当成数据库权限系统。
+它不是数据库权限系统。
 
 ## 受治理只读执行边界
 
-执行层是独立应用服务，而不是 Text2SQL 内部的一个 `execute=True` 开关。
+执行层是独立应用服务，不是 Text2SQL 内部的 `execute=True` 开关。
 
 ```mermaid
 flowchart TD
-    Candidate[已生成 SQL] --> Explicit[显式 UI/API 操作]
+    Candidate[Candidate SQL] --> Explicit[显式 UI/API 操作]
     Explicit --> Enabled{Execution enabled?}
-    Enabled -->|No| Disabled[503 / Disabled]
-    Enabled -->|Yes| DS{Whitelist datasource?}
+    Enabled -->|No| Disabled[503]
+    Enabled -->|Yes| DS{Configured datasource?}
     DS -->|No| NotFound[404]
     DS -->|Yes| Policy[ReadOnlySQLPolicy]
     Policy -->|Reject| Rejected[400]
@@ -165,21 +190,34 @@ flowchart TD
     DBReadOnly --> QueryOnly[PRAGMA query_only=ON]
     QueryOnly --> Deadline[Progress-handler deadline]
     Deadline --> RowCap[Server max rows]
-    RowCap --> Audit[Query ID + SQL SHA256 + status + latency]
+    RowCap --> Audit[Query ID + actor + SQL SHA256 + status + latency]
     Audit --> Rows[Structured rows]
 ```
 
-当前安全措施：
+防御纵深：
 
-1. **默认关闭**：`DATACOPILOT_QUERY_EXECUTION__ENABLED=false`；
-2. **白名单数据源**：API 不接受任意 DB URL/path；
-3. **二次只读策略**：即使 SQL 已通过 Text2SQL Validator，执行前仍重验；
-4. **数据库只读模式**：SQLite `mode=ro` + `query_only`；
-5. **Deadline**：progress handler 中断超时查询；
-6. **服务端 Row Cap**：客户端不能放大配置上限；
-7. **审计**：记录 Query ID、数据源、SQL SHA-256、状态、耗时和结果规模，不记录数据库凭据。
+1. 默认关闭 execution；
+2. 只接受服务端配置 datasource；
+3. 独立 `ReadOnlySQLPolicy`；
+4. 数据库只读模式；
+5. deadline；
+6. server row cap；
+7. 结构化审计；
+8. API key / role gate。
 
-生产 MySQL/ClickHouse 适配器还必须叠加数据库原生只读账号、statement timeout、资源组/扫描量、并发限制和 Secret Manager。
+生产 MySQL/ClickHouse 还必须叠加原生只读账号、statement timeout、资源组/扫描量、并发限制和 Secret Manager。
+
+## 身份与 RBAC
+
+所有 `/api/v1/*` 路由位于受保护 Router 下；`/health` 保持公开健康检查。鉴权关闭时允许本地开发；开启后通过 `X-API-Key` 解析 principal。
+
+角色最小权限：
+
+- reader：读取 API 与 Schema 元数据；
+- analyst：在 reader 基础上可显式执行只读查询；
+- admin：管理级能力。
+
+当前是轻量 API-key RBAC，不代表已经实现企业 IAM。多租户部署仍需 OIDC/SSO、tenant/workspace identity 和 tenant-scoped data policy。
 
 ## Agent 流程
 
@@ -201,11 +239,11 @@ flowchart TD
     Validate --> Format[Response]
 ```
 
-工具参数由 Pydantic/JSON Schema 约束；图有最大步骤/递归边界。执行数据库没有放入 Agent Tool 列表，避免自主链路引入隐式资源副作用。
+工具参数由 Pydantic/JSON Schema 约束，图有最大步骤/递归边界。数据库执行不进入 Agent Tool 列表。
 
-## Evaluation / Benchmark
+## Evaluation / Golden Result Oracle
 
-项目不使用一个笼统“准确率”覆盖所有问题。
+项目拒绝用一个笼统“准确率”覆盖整个 AI 系统。
 
 Text2SQL benchmark 分开记录：
 
@@ -214,31 +252,43 @@ Text2SQL benchmark 分开记录：
 - execution attempted / succeeded；
 - expected table recall；
 - schema hallucination；
+- result oracle coverage；
+- result comparison rate；
+- **business result accuracy**；
 - generation P95 latency；
 - execution latency；
 - token usage。
 
-Safety benchmark 记录：
+Safety benchmark 记录 decision accuracy、unsafe rejection rate 和 safe acceptance rate。
 
-- decision accuracy；
-- unsafe rejection rate；
-- safe acceptance rate。
+每个零售 case 包含 `golden_sql`。Runner 在同一只读数据源执行生成 SQL 和 Golden SQL，再比较结果集。
 
-`Execution Success` 只表示 SQL 在受控数据源上成功运行，**不是业务结果正确率**。真正的结果准确率需要 golden SQL / golden result oracle。
+```mermaid
+flowchart LR
+    Question --> Generate[Generated SQL]
+    Generate --> Validate
+    Validate --> GeneratedRows[Execute Generated]
+    Golden[Golden SQL] --> GoldenRows[Execute Golden]
+    GeneratedRows --> Compare[Result-set Oracle]
+    GoldenRows --> Compare
+    Compare --> Accuracy[Business Result Accuracy]
+```
+
+`business_result_accuracy` 的分母是全部存在 Oracle 的 case，所以生成失败、校验失败和执行失败会真实拉低端到端结果，而不是从指标里被过滤掉。
+
+当前通用 helper 只适合零售小型聚合结果：忽略行顺序和列别名，并对数值做有限精度归一化。生产复杂 SQL 应采用 case-specific oracle，尤其要显式处理 duplicate、ordering、NULL、timestamp 和近似聚合语义。
 
 ## 可复现零售场景
 
-`examples/retail_analytics/` 包含 Schema、seed data、指标口径、问题集、安全测试集、SQLite 初始化脚本、演示脚本和 benchmark runner。
-
-本地流程：
+`examples/retail_analytics/` 包含：Schema、seed data、指标口径、问题集、Golden SQL、安全测试集、SQLite 初始化脚本、演示脚本和 benchmark runner。
 
 ```bash
 python examples/retail_analytics/setup_demo_db.py --force
-# 显式开启 .env 中 QUERY_EXECUTION
 python manage.py start --no-open
-python examples/retail_analytics/run_demo.py
 python examples/retail_analytics/evaluate_text2sql.py
 ```
+
+Benchmark 使用 datasource-driven Text2SQL，因此会覆盖真实 Schema discovery，而不是维护一套与产品主链路不同的评测入口。
 
 ## 部署拓扑
 
@@ -249,8 +299,18 @@ flowchart LR
     Backend --> Chroma[ChromaDB]
     Backend --> Cloud[DeepSeek / OpenAI]
     Backend -. optional .-> Ollama
+    Backend --> Metadata[(Schema / Registry Metadata)]
     Backend -. explicit + disabled by default .-> DemoDB[(SQLite Demo DB)]
     Backend --> Logs[(Structured Logs)]
 ```
 
-Docker Compose 提供健康检查、资源限制、网络和项目内数据挂载。当前成熟化的下一阶段是：API 鉴权/RBAC、持久化 Registry、MySQL/ClickHouse 只读适配器、OpenTelemetry/LLM tracing、异步摄取任务队列。
+Docker Compose 提供健康检查、资源限制、网络和项目内数据挂载。
+
+## 下一阶段生产化重点
+
+- 多数据源 Registry + MySQL/ClickHouse Schema/Query adapters；
+- OIDC/SSO、Workspace/Tenant 隔离和 tenant-scoped RBAC；
+- OpenTelemetry + LLM/Query spans + metrics dashboard；
+- 异步文档摄取任务队列；
+- Redis/DB 分布式会话状态；
+- 版本化 benchmark、case-specific oracle 和模型质量回归阈值。
