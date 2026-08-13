@@ -9,6 +9,7 @@ from backend.app.application.evaluation import (
     Text2SQLBenchmarkReport,
     extract_referenced_tables,
     extract_schema_tables,
+    result_rows_equivalent,
 )
 
 
@@ -35,6 +36,24 @@ def test_extract_schema_tables_supports_qualified_and_quoted_names() -> None:
     assert extract_schema_tables(schema) == {"orders", "analytics.customers"}
 
 
+def test_result_rows_equivalent_ignores_alias_order_and_small_float_noise() -> None:
+    actual = [
+        {"region_name": "East", "metric": 99.0000001},
+        {"region_name": "North", "metric": 123},
+    ]
+    expected = [
+        {"gmv": 123.0, "region": "North"},
+        {"gmv": 99.0, "region": "East"},
+    ]
+
+    assert result_rows_equivalent(actual, expected) is True
+    assert result_rows_equivalent(actual, expected[:1]) is False
+    assert result_rows_equivalent(
+        [{"region": "East", "metric": 100.0}],
+        [{"region": "East", "metric": 99.0}],
+    ) is False
+
+
 def test_text2sql_benchmark_report_keeps_metrics_distinct() -> None:
     report = Text2SQLBenchmarkReport.from_cases(
         [
@@ -44,6 +63,9 @@ def test_text2sql_benchmark_report_keeps_metrics_distinct() -> None:
                 validation_passed=True,
                 execution_attempted=True,
                 execution_succeeded=True,
+                result_oracle_available=True,
+                result_match_attempted=True,
+                result_matched=True,
                 expected_tables={"orders", "customers"},
                 referenced_tables={"orders", "customers"},
                 allowed_tables={"orders", "customers", "refunds"},
@@ -55,6 +77,7 @@ def test_text2sql_benchmark_report_keeps_metrics_distinct() -> None:
                 case_id="hallucination",
                 generation_succeeded=True,
                 validation_passed=False,
+                result_oracle_available=True,
                 expected_tables={"refunds", "orders"},
                 referenced_tables={"refunds", "invented_table"},
                 allowed_tables={"orders", "customers", "refunds"},
@@ -78,6 +101,9 @@ def test_text2sql_benchmark_report_keeps_metrics_distinct() -> None:
     assert report.execution_success_rate == 1.0
     assert report.expected_table_recall == 0.5
     assert report.schema_hallucination_rate == 0.3333
+    assert report.result_oracle_coverage == 0.6667
+    assert report.result_comparison_rate == 0.5
+    assert report.business_result_accuracy == 0.5
     assert report.average_generation_latency_ms == 200.0
     assert report.p95_generation_latency_ms == 300
     assert report.average_execution_latency_ms == 20.0
@@ -91,6 +117,9 @@ def test_text2sql_benchmark_report_handles_no_cases() -> None:
     assert report.case_count == 0
     assert report.execution_success_rate == 0.0
     assert report.p95_generation_latency_ms == 0.0
+    assert report.result_oracle_coverage == 0.0
+    assert report.result_comparison_rate == 0.0
+    assert report.business_result_accuracy is None
 
 
 def test_safety_policy_report_tracks_safe_and_unsafe_decisions() -> None:
@@ -141,3 +170,4 @@ def test_benchmark_runner_help_works_as_documented() -> None:
     assert result.returncode == 0, result.stderr
     assert "--backend-url" in result.stdout
     assert "--use-rag" in result.stdout
+    assert "--api-key" in result.stdout
