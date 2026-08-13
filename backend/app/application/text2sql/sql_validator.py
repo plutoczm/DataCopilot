@@ -19,8 +19,30 @@ QUALIFIED_COLUMN_PATTERN = re.compile(
     re.IGNORECASE,
 )
 
+PROHIBITED_STATEMENTS: dict[str, str] = {
+    "delete": "dangerous_delete",
+    "update": "dangerous_update",
+    "insert": "dangerous_insert",
+    "drop": "dangerous_drop",
+    "alter": "dangerous_alter",
+    "truncate": "dangerous_truncate",
+    "create": "dangerous_create",
+    "replace": "dangerous_replace",
+    "merge": "dangerous_merge",
+    "grant": "dangerous_grant",
+    "revoke": "dangerous_revoke",
+    "call": "dangerous_call",
+    "execute": "dangerous_execute",
+}
+
 
 class SQLValidator:
+    """对模型生成 SQL 做确定性、只读安全校验。
+
+    该校验器不是数据库权限系统的替代品。生产执行层仍应使用只读账号、
+    查询超时和行数限制；这里负责在 SQL 进入执行边界之前尽早拒绝明显风险。
+    """
+
     def validate(
         self,
         sql: str,
@@ -40,7 +62,8 @@ class SQLValidator:
                 )
             )
 
-        issues.extend(self._detect_dangerous_dml(normalized_sql))
+        issues.extend(self._detect_multiple_statements(sql))
+        issues.extend(self._detect_dangerous_statements(normalized_sql))
         table_aliases, table_issues = self._extract_table_aliases(sql, schema)
         issues.extend(table_issues)
         issues.extend(self._detect_unknown_columns(sql, schema, table_aliases))
@@ -52,31 +75,42 @@ class SQLValidator:
         return SQLValidationResult(is_valid=is_valid, issues=issues)
 
     def _normalize_sql(self, sql: str) -> str:
-        return re.sub(r"\s+", " ", sql.strip()).lower()
+        without_literals = re.sub(r"'(?:''|[^'])*'", "''", sql)
+        return re.sub(r"\s+", " ", without_literals.strip()).lower()
 
     def _has_valid_structure(self, normalized_sql: str) -> bool:
         if not normalized_sql:
             return False
         return normalized_sql.startswith("select") or normalized_sql.startswith("with")
 
-    def _detect_dangerous_dml(self, normalized_sql: str) -> list[SQLValidationIssue]:
+    def _detect_multiple_statements(self, sql: str) -> list[SQLValidationIssue]:
+        stripped = sql.strip()
+        if stripped.endswith(";"):
+            stripped = stripped[:-1]
+        if ";" not in stripped:
+            return []
+        return [
+            SQLValidationIssue(
+                code="multiple_statements",
+                severity="error",
+                message="Only one read-only SQL statement is allowed.",
+            )
+        ]
+
+    def _detect_dangerous_statements(
+        self,
+        normalized_sql: str,
+    ) -> list[SQLValidationIssue]:
         issues: list[SQLValidationIssue] = []
-        if re.search(r"\bdelete\s+from\b", normalized_sql):
-            issues.append(
-                SQLValidationIssue(
-                    code="dangerous_delete",
-                    severity="error",
-                    message="DELETE statements are not allowed.",
+        for keyword, code in PROHIBITED_STATEMENTS.items():
+            if re.search(rf"\b{keyword}\b", normalized_sql):
+                issues.append(
+                    SQLValidationIssue(
+                        code=code,
+                        severity="error",
+                        message=f"{keyword.upper()} statements are not allowed.",
+                    )
                 )
-            )
-        if re.search(r"\bupdate\s+[a-zA-Z_][\w.]*\b", normalized_sql):
-            issues.append(
-                SQLValidationIssue(
-                    code="dangerous_update",
-                    severity="error",
-                    message="UPDATE statements are not allowed.",
-                )
-            )
         return issues
 
     def _extract_table_aliases(
