@@ -21,6 +21,8 @@ from backend.app.presentation.api.dependencies.providers import get_query_execut
 
 
 def build_database(path: Path) -> None:
+    if path.exists():
+        path.unlink()
     connection = sqlite3.connect(path)
     try:
         connection.executescript(
@@ -78,7 +80,10 @@ def test_query_execution_settings_are_disabled_and_project_local_by_default() ->
     ):
         Settings(
             _env_file=None,
-            query_execution={"sqlite_path": "/var/lib/datacopilot/demo.db"},
+            query_execution={
+                "enabled": True,
+                "sqlite_path": "/var/lib/datacopilot/demo.db",
+            },
         )
 
 
@@ -167,7 +172,7 @@ def test_query_execution_api_returns_datasources_and_rows(tmp_path: Path) -> Non
             "max_rows": 1,
         },
     )
-    assert response.status_code == 200
+    assert response.status_code == 200, response.text
     result = response.json()
     assert result["row_count"] == 1
     assert result["truncated"] is True
@@ -189,5 +194,5 @@ def test_query_execution_api_maps_policy_errors_to_client_error(tmp_path: Path) 
         },
     )
 
-    assert response.status_code == 400
+    assert response.status_code == 400, response.text
     assert response.json()["error"]["code"] == "query_rejected"

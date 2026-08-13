@@ -298,7 +298,9 @@ class Settings(BaseSettings):
             self.query_execution.sqlite_path,
             self.paths.project_root,
         )
-        if not sqlite_path.is_relative_to(self.paths.project_root):
+        if self.query_execution.enabled and not sqlite_path.is_relative_to(
+            self.paths.project_root
+        ):
             raise ValueError("query_execution.sqlite_path must stay inside project_root")
         execution_data["sqlite_path"] = sqlite_path
         object.__setattr__(
