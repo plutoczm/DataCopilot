@@ -118,12 +118,7 @@ class BackendClient:
             payload["session_id"] = session_id
         if retrieval_mode != "hybrid":
             payload["retrieval_mode"] = retrieval_mode
-        return self._json(
-            self.client.post(
-                "/api/v1/agent/chat",
-                json=payload,
-            )
-        )
+        return self._json(self.client.post("/api/v1/agent/chat", json=payload))
 
     def stream_agent_chat(
         self,
@@ -166,33 +161,21 @@ class BackendClient:
         datasource: str | None = None,
         use_rag: bool = False,
     ) -> dict[str, Any]:
-        payload: dict[str, Any] = {
-            "question": question,
-            "use_rag": use_rag,
-        }
+        payload: dict[str, Any] = {"question": question, "use_rag": use_rag}
         if engine:
             payload["engine"] = engine
         if schema_context:
             payload["schema_context"] = schema_context
         if datasource:
             payload["datasource"] = datasource
-        return self._json(
-            self.client.post(
-                "/api/v1/text2sql",
-                json=payload,
-            )
-        )
+        return self._json(self.client.post("/api/v1/text2sql", json=payload))
 
     def list_query_datasources(self) -> dict[str, Any]:
-        return self._json(
-            self.client.get("/api/v1/query-execution/datasources")
-        )
+        return self._json(self.client.get("/api/v1/query-execution/datasources"))
 
     def get_query_datasource_schema(self, datasource: str) -> dict[str, Any]:
         return self._json(
-            self.client.get(
-                f"/api/v1/query-execution/datasources/{datasource}/schema"
-            )
+            self.client.get(f"/api/v1/query-execution/datasources/{datasource}/schema")
         )
 
     def execute_query(
@@ -201,17 +184,16 @@ class BackendClient:
         datasource: str,
         sql: str,
         max_rows: int = 200,
+        expected_schema_fingerprint: str | None = None,
     ) -> dict[str, Any]:
-        return self._json(
-            self.client.post(
-                "/api/v1/query-execution",
-                json={
-                    "datasource": datasource,
-                    "sql": sql,
-                    "max_rows": max_rows,
-                },
-            )
-        )
+        payload: dict[str, Any] = {
+            "datasource": datasource,
+            "sql": sql,
+            "max_rows": max_rows,
+        }
+        if expected_schema_fingerprint:
+            payload["expected_schema_fingerprint"] = expected_schema_fingerprint
+        return self._json(self.client.post("/api/v1/query-execution", json=payload))
 
     def sql_review(
         self,
@@ -268,7 +250,4 @@ class BackendClient:
                 continue
             if line.startswith("data:"):
                 payload = line.removeprefix("data:").strip()
-                yield {
-                    "event": event or "message",
-                    "data": json.loads(payload),
-                }
+                yield {"event": event or "message", "data": json.loads(payload)}
