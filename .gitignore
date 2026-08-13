@@ -11,6 +11,8 @@ data/logs/*
 data/cache/*
 data/embeddings/*
 data/temp/*
+data/demo/*
+data/evaluation/*
 models/*
 
 !data/chromadb/.gitkeep
