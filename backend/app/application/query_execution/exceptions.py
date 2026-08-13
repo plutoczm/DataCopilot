@@ -23,6 +23,11 @@ class QueryRejectedError(QueryExecutionError):
     code = "query_rejected"
 
 
+class SchemaDriftError(QueryExecutionError):
+    status_code = 409
+    code = "schema_drift"
+
+
 class QueryTimeoutError(QueryExecutionError):
     status_code = 408
     code = "query_timeout"
