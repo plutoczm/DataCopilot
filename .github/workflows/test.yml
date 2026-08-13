@@ -1,4 +1,4 @@
-name: tests
+name: ci
 
 on:
   push:
@@ -11,8 +11,8 @@ on:
       - master
 
 jobs:
-  pytest:
-    runs-on: ubuntu-20.04
+  quality:
+    runs-on: ubuntu-24.04
 
     steps:
       - name: Checkout
@@ -35,12 +35,16 @@ jobs:
 
       - name: Prepare runtime directories
         run: |
-          mkdir -p data/chromadb data/uploads data/logs data/cache data/embeddings data/temp data/models data/ollama
+          mkdir -p data/chromadb data/uploads data/logs data/cache data/embeddings data/temp data/models data/ollama models
 
-      - name: Run tests
+      - name: Compile Python modules
         run: |
-          python -m pytest -v
+          python -m compileall -q backend frontend examples/retail_analytics
 
-      - name: Run coverage
+      - name: Validate Docker Compose
         run: |
-          python -m pytest --cov=backend --cov=frontend --cov-report=term-missing --cov-fail-under=85
+          docker compose --env-file docker/.env.production config --quiet
+
+      - name: Run tests and coverage gate
+        run: |
+          python -m pytest -q --cov=backend --cov=frontend --cov-report=term-missing --cov-fail-under=85
