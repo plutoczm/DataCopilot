@@ -215,6 +215,45 @@ def test_sql_validator_detects_rule_violations() -> None:
     assert dangerous_delete.has_issue("dangerous_delete")
 
 
+def test_sql_validator_blocks_multi_statement_and_ddl_dml_payloads() -> None:
+    schema = SchemaService().parse_schema_context(SCHEMA_CONTEXT)
+    validator = SQLValidator()
+
+    multi_statement = validator.validate(
+        "SELECT u.user_id FROM user_info u; DROP TABLE user_info",
+        schema=schema,
+        engine=SQLEngine.MYSQL,
+    )
+    assert multi_statement.is_valid is False
+    assert multi_statement.has_issue("multiple_statements")
+    assert multi_statement.has_issue("dangerous_drop")
+
+    insert_cte = validator.validate(
+        "WITH src AS (SELECT u.user_id FROM user_info u) "
+        "INSERT INTO order_info (user_id) SELECT user_id FROM src",
+        schema=schema,
+        engine=SQLEngine.MYSQL,
+    )
+    assert insert_cte.is_valid is False
+    assert insert_cte.has_issue("dangerous_insert")
+
+    trailing_semicolon = validator.validate(
+        "SELECT u.user_id FROM user_info u;",
+        schema=schema,
+        engine=SQLEngine.MYSQL,
+    )
+    assert trailing_semicolon.is_valid is True
+    assert trailing_semicolon.has_issue("multiple_statements") is False
+
+    keyword_in_literal = validator.validate(
+        "SELECT u.user_id FROM user_info u WHERE u.province = 'drop'",
+        schema=schema,
+        engine=SQLEngine.MYSQL,
+    )
+    assert keyword_in_literal.is_valid is True
+    assert keyword_in_literal.has_issue("dangerous_drop") is False
+
+
 async def test_text2sql_service_generates_valid_sql_with_mock_llm() -> None:
     llm = FakeLLMProvider()
     service = Text2SQLService(llm_provider=llm)
