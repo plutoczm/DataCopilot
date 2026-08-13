@@ -66,7 +66,7 @@ def get_datasource_schema(
     summary="受治理地执行只读 SQL",
     description=(
         "仅允许 analyst/admin 显式执行单条 SELECT/WITH 查询，并叠加服务器端"
-        "行数上限、超时、只读数据库连接和结构化审计日志。"
+        "行数上限、超时、只读数据库连接、Schema drift precondition 和结构化审计日志。"
     ),
 )
 def execute_query(
@@ -81,5 +81,6 @@ def execute_query(
         sql=request.sql,
         max_rows=request.max_rows,
         actor=principal.subject,
+        expected_schema_fingerprint=request.expected_schema_fingerprint,
     )
     return QueryExecutionResponse(**result.model_dump())
