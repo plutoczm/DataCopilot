@@ -45,6 +45,19 @@ class StubHTTPClient:
             return StubResponse({"status": "ok"})
         if path == "/api/v1/knowledge/documents":
             return StubResponse({"documents": []})
+        if path == "/api/v1/query-execution/datasources":
+            return StubResponse(
+                {
+                    "execution_enabled": True,
+                    "datasources": [
+                        {
+                            "name": "retail_demo",
+                            "kind": "sqlite",
+                            "available": True,
+                        }
+                    ],
+                }
+            )
         return StubResponse({})
 
     def post(self, path: str, **kwargs):
@@ -58,6 +71,18 @@ class StubHTTPClient:
                     "routing_path": ["classify_intent", "general_chat", "format_response"],
                     "metadata": {},
                     "token_usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+                }
+            )
+        if path == "/api/v1/query-execution":
+            return StubResponse(
+                {
+                    "query_id": "query-1",
+                    "datasource": "retail_demo",
+                    "columns": ["value"],
+                    "rows": [{"value": 1}],
+                    "row_count": 1,
+                    "truncated": False,
+                    "elapsed_ms": 1.2,
                 }
             )
         return StubResponse({"ok": True, "sql": "SELECT 1", "answer": "done"})
@@ -117,6 +142,12 @@ def test_backend_client_calls_expected_api_paths() -> None:
     client.list_documents()
     client.query_knowledge("What is AQE?")
     client.text2sql("统计GMV", "hive", "orders(order_id bigint)")
+    datasource_config = client.list_query_datasources()
+    query_result = client.execute_query(
+        datasource="retail_demo",
+        sql="SELECT 1 AS value",
+        max_rows=10,
+    )
     client.sql_review("SELECT * FROM t", "spark")
     client.warehouse_design("设计电商订单分析数仓", use_rag=True)
     client.agent_chat("介绍一下你")
@@ -128,11 +159,15 @@ def test_backend_client_calls_expected_api_paths() -> None:
     assert "/api/v1/knowledge/documents" in paths
     assert "/api/v1/knowledge/query" in paths
     assert "/api/v1/text2sql" in paths
+    assert "/api/v1/query-execution/datasources" in paths
+    assert "/api/v1/query-execution" in paths
     assert "/api/v1/sql-review" in paths
     assert "/api/v1/warehouse-design" in paths
     assert "/api/v1/agent/chat" in paths
     assert "/api/v1/agent/chat/stream" in paths
     assert "/api/v1/chat/stream" in paths
+    assert datasource_config["execution_enabled"] is True
+    assert query_result["query_id"] == "query-1"
     assert chunks[0]["event"] == "token"
     assert chunks[0]["data"]["text"] == "hello"
     assert agent_chunks[0]["event"] == "token"
@@ -284,7 +319,14 @@ def test_frontend_pages_use_chinese_display_text() -> None:
         "frontend/app.py": ["数据工程 AI 工作台", "系统状态", "工作区"],
         "frontend/pages/chat.py": ["智能问答", "上下文设置", "向 DataPilot-AI 提问", "演示问题"],
         "frontend/pages/knowledge_base.py": ["知识库", "上传文档", "文档列表", "知识问答"],
-        "frontend/pages/text2sql.py": ["自然语言生成 SQL", "业务需求", "生成 SQL", "一键示例"],
+        "frontend/pages/text2sql.py": [
+            "自然语言生成 SQL",
+            "业务需求",
+            "生成 SQL",
+            "一键示例",
+            "受控只读执行",
+            "白名单只读数据源",
+        ],
         "frontend/pages/sql_review.py": ["SQL 审查", "风险等级", "优化建议", "一键示例"],
         "frontend/pages/warehouse_design.py": ["数仓设计", "业务需求", "生成数仓方案", "一键示例"],
     }
