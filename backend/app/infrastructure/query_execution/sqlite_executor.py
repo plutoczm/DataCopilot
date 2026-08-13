@@ -1,3 +1,4 @@
+import hashlib
 import sqlite3
 import time
 from pathlib import Path
@@ -8,6 +9,7 @@ from backend.app.application.query_execution.exceptions import (
     QueryTimeoutError,
 )
 from backend.app.domain.ports.query_executor import QueryPage
+from backend.app.domain.ports.schema_catalog import DataSourceSchemaSnapshot
 
 
 class SQLiteReadOnlyExecutor:
@@ -26,6 +28,50 @@ class SQLiteReadOnlyExecutor:
     def available(self) -> bool:
         return self.database_path.is_file()
 
+    def load_schema(self) -> DataSourceSchemaSnapshot:
+        """Return a deterministic, non-secret schema snapshot for Text2SQL.
+
+        Schema introspection is intentionally separate from arbitrary query execution: it
+        remains available when the execution feature flag is off, so users can generate
+        and review SQL without granting the application permission to execute model output.
+        """
+
+        if not self.available():
+            raise DataSourceUnavailableError(
+                f"Datasource '{self.name}' is unavailable. Initialize the demo database first."
+            )
+
+        try:
+            connection = sqlite3.connect(self._read_only_uri(), uri=True)
+            try:
+                rows = connection.execute(
+                    """
+                    SELECT name, sql
+                    FROM sqlite_schema
+                    WHERE type = 'table'
+                      AND name NOT LIKE 'sqlite_%'
+                      AND sql IS NOT NULL
+                    ORDER BY name
+                    """
+                ).fetchall()
+            finally:
+                connection.close()
+        except sqlite3.DatabaseError as exc:
+            raise QueryExecutionError(
+                f"SQLite schema introspection failed: {exc}"
+            ) from exc
+
+        statements = [str(row[1]).strip().rstrip(";") + ";" for row in rows]
+        schema_context = "\n\n".join(statements)
+        fingerprint = hashlib.sha256(schema_context.encode("utf-8")).hexdigest()
+        return DataSourceSchemaSnapshot(
+            datasource=self.name,
+            engine=self.kind,
+            schema_context=schema_context,
+            table_count=len(statements),
+            fingerprint=fingerprint,
+        )
+
     def execute(
         self,
         sql: str,
@@ -40,11 +86,10 @@ class SQLiteReadOnlyExecutor:
 
         started_at = time.perf_counter()
         deadline = started_at + (timeout_ms / 1000.0)
-        uri = f"{self.database_path.as_uri()}?mode=ro"
 
         try:
             connection = sqlite3.connect(
-                uri,
+                self._read_only_uri(),
                 uri=True,
                 timeout=max(0.1, timeout_ms / 1000.0),
             )
@@ -80,3 +125,6 @@ class SQLiteReadOnlyExecutor:
             truncated=truncated,
             elapsed_ms=elapsed_ms,
         )
+
+    def _read_only_uri(self) -> str:
+        return f"{self.database_path.as_uri()}?mode=ro"
