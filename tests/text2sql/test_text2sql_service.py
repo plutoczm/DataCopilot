@@ -5,6 +5,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from backend.app.application.rag.models import RAGResponse
+from backend.app.application.text2sql.exceptions import SQLGenerationError
 from backend.app.application.text2sql.models import (
     SQLEngine,
     SQLValidationResult,
@@ -15,6 +16,7 @@ from backend.app.application.text2sql.schema_service import SchemaService
 from backend.app.application.text2sql.sql_validator import SQLValidator
 from backend.app.application.text2sql.text2sql_service import Text2SQLService
 from backend.app.domain.ports.llm_provider import LLMMessage, LLMResponse, LLMUsage
+from backend.app.domain.ports.schema_catalog import DataSourceSchemaSnapshot
 from backend.app.main import create_app
 from backend.app.presentation.api.dependencies.providers import get_text2sql_service
 
@@ -96,8 +98,48 @@ class FakeRAGService:
         )
 
 
+class FakeSchemaCatalog:
+    def __init__(
+        self,
+        *,
+        name: str = "retail_demo",
+        engine: str = "sqlite",
+        available: bool = True,
+    ) -> None:
+        self._name = name
+        self.engine = engine
+        self._available = available
+
+    @property
+    def name(self) -> str:
+        return self._name
+
+    def available(self) -> bool:
+        return self._available
+
+    def load_schema(self) -> DataSourceSchemaSnapshot:
+        schema_context = """
+CREATE TABLE order_info (
+    order_id INTEGER PRIMARY KEY,
+    amount REAL NOT NULL,
+    status TEXT NOT NULL
+);
+""".strip()
+        return DataSourceSchemaSnapshot(
+            datasource=self.name,
+            engine=self.engine,
+            schema_context=schema_context,
+            table_count=1,
+            fingerprint="a" * 64,
+        )
+
+
 class FakeText2SQLService:
+    def __init__(self) -> None:
+        self.kwargs: dict = {}
+
     async def generate(self, **kwargs) -> Text2SQLResult:
+        self.kwargs = kwargs
         return Text2SQLResult(
             sql="SELECT COUNT(*) AS active_users FROM user_info",
             explanation="Count active users from user_info.",
@@ -269,10 +311,83 @@ async def test_text2sql_service_generates_valid_sql_with_mock_llm() -> None:
     assert "order_info" in result.sql
     assert result.validation.is_valid is True
     assert result.confidence == 0.95
+    assert result.metadata["schema_source"] == "request"
     assert any("index" in suggestion.lower() for suggestion in result.optimization_suggestions)
     prompt = "\n".join(message.content for message in llm.messages)
     assert "Never invent tables" in prompt
     assert "统计每个省份订单金额Top10" in prompt
+
+
+async def test_text2sql_service_discovers_schema_from_datasource() -> None:
+    llm = FakeLLMProvider(
+        json.dumps(
+            {
+                "sql": "SELECT COUNT(*) AS order_count FROM order_info",
+                "explanation": "Count orders.",
+                "optimization_suggestions": [],
+                "confidence": 0.93,
+            }
+        )
+    )
+    catalog = FakeSchemaCatalog()
+    service = Text2SQLService(
+        llm_provider=llm,
+        schema_catalogs={catalog.name: catalog},
+    )
+
+    result = await service.generate(
+        question="统计订单数",
+        datasource="retail_demo",
+    )
+
+    assert result.engine is SQLEngine.SQLITE
+    assert result.validation.is_valid is True
+    assert result.metadata["schema_source"] == "datasource"
+    assert result.metadata["datasource"] == "retail_demo"
+    assert result.metadata["schema_fingerprint"] == "a" * 64
+    assert result.metadata["schema_table_count_discovered"] == 1
+    prompt = "\n".join(message.content for message in llm.messages)
+    assert "Target engine: sqlite" in prompt
+    assert "order_info" in prompt
+
+
+async def test_text2sql_service_rejects_ambiguous_or_mismatched_schema_source() -> None:
+    catalog = FakeSchemaCatalog()
+    service = Text2SQLService(
+        llm_provider=FakeLLMProvider(),
+        schema_catalogs={catalog.name: catalog},
+    )
+
+    with pytest.raises(SQLGenerationError, match="either datasource or schema_context"):
+        await service.generate(
+            question="统计订单数",
+            datasource="retail_demo",
+            schema_context=SCHEMA_CONTEXT,
+        )
+
+    with pytest.raises(SQLGenerationError, match="does not match datasource engine"):
+        await service.generate(
+            question="统计订单数",
+            datasource="retail_demo",
+            engine=SQLEngine.MYSQL,
+        )
+
+    with pytest.raises(SQLGenerationError, match="Unknown datasource"):
+        await service.generate(
+            question="统计订单数",
+            datasource="missing",
+        )
+
+    unavailable = FakeSchemaCatalog(name="offline", available=False)
+    unavailable_service = Text2SQLService(
+        llm_provider=FakeLLMProvider(),
+        schema_catalogs={unavailable.name: unavailable},
+    )
+    with pytest.raises(SQLGenerationError, match="unavailable for schema discovery"):
+        await unavailable_service.generate(
+            question="统计订单数",
+            datasource="offline",
+        )
 
 
 async def test_text2sql_service_adds_engine_specific_optimization_hints() -> None:
@@ -313,8 +428,9 @@ async def test_text2sql_service_uses_rag_context_when_enabled() -> None:
 
 
 def test_text2sql_api_endpoint_returns_structured_response() -> None:
+    fake_service = FakeText2SQLService()
     app = create_app()
-    app.dependency_overrides[get_text2sql_service] = lambda: FakeText2SQLService()
+    app.dependency_overrides[get_text2sql_service] = lambda: fake_service
     client = TestClient(app, raise_server_exceptions=False)
 
     response = client.post(
@@ -333,3 +449,15 @@ def test_text2sql_api_endpoint_returns_structured_response() -> None:
     assert payload["engine"] == "hive"
     assert payload["confidence"] == 0.91
     assert payload["validation"]["is_valid"] is True
+
+    datasource_response = client.post(
+        "/api/v1/text2sql",
+        json={
+            "question": "统计订单数",
+            "datasource": "retail_demo",
+        },
+    )
+    assert datasource_response.status_code == 200
+    assert fake_service.kwargs["datasource"] == "retail_demo"
+    assert fake_service.kwargs["engine"] is None
+    assert fake_service.kwargs["schema_context"] is None
