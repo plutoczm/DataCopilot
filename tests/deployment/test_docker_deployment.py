@@ -24,14 +24,15 @@ def test_compose_defines_required_services_profiles_and_network() -> None:
     assert "datacopilot" in compose["networks"]
 
 
-def test_compose_backend_exposes_routing_and_local_model_env_passthrough() -> None:
+def test_compose_backend_exposes_only_supported_provider_env_passthrough() -> None:
     compose = load_compose()
     backend_env = compose["x-backend-env"]
 
-    assert backend_env["DATACOPILOT_LLM__ROUTING_ENABLED"] == "${ROUTING_ENABLED:-false}"
-    assert backend_env["DATACOPILOT_LOCAL__ENABLED"] == "${LOCAL_MODEL_ENABLED:-false}"
-    assert backend_env["DATACOPILOT_LOCAL__BASE_URL"].startswith("${LOCAL_MODEL_BASE_URL")
-    assert backend_env["DATACOPILOT_LOCAL__CHAT_MODEL"].startswith("${LOCAL_MODEL_NAME")
+    assert backend_env["DATACOPILOT_LLM__DEFAULT_PROVIDER"] == "${LLM_PROVIDER:-deepseek}"
+    assert backend_env["DATACOPILOT_OPENAI__ENABLED"] == "${OPENAI_ENABLED:-false}"
+    assert backend_env["DATACOPILOT_OLLAMA__ENABLED"] == "${OLLAMA_ENABLED:-false}"
+    assert "DATACOPILOT_LLM__ROUTING_ENABLED" not in backend_env
+    assert "DATACOPILOT_LOCAL__ENABLED" not in backend_env
 
 
 def test_compose_uses_only_project_local_bind_mounts_and_no_anonymous_volumes() -> None:
@@ -102,11 +103,13 @@ def test_production_env_file_sets_safe_runtime_defaults_without_secrets() -> Non
     assert HOST_PROJECT_PATH not in content
 
 
-def test_env_example_does_not_set_legacy_chroma_client_variables() -> None:
+def test_env_example_does_not_set_legacy_or_removed_provider_variables() -> None:
     content = Path(".env.example").read_text(encoding="utf-8")
 
     assert "CHROMA_DB_IMPL" not in content
     assert "CHROMA_PERSIST_DIRECTORY" not in content
+    assert "DATACOPILOT_LOCAL__" not in content
+    assert "DATACOPILOT_LLM__ROUTING_" not in content
     assert "sk-" not in content.lower()
 
 
