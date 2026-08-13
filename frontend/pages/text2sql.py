@@ -23,16 +23,17 @@ ENGINE_OPTIONS = {
     "MySQL": "mysql",
     "ClickHouse": "clickhouse",
 }
+MANUAL_SCHEMA_OPTION = "手动输入 Schema"
 
 
 def render() -> None:
     apply_theme()
-    hero("自然语言生成 SQL", "把中文业务需求转换为可审查、可验证、可受控执行的 SQL。")
+    hero("自然语言生成 SQL", "选择已配置数据源或手工 Schema，把业务需求转换为可验证、可受控执行的 SQL。")
     card_grid(
         [
-            ("多引擎支持", "覆盖 SQLite、Hive、Spark SQL、MySQL 和 ClickHouse。"),
+            ("Schema 自动发现", "可直接选择白名单数据源，由后端读取表结构并绑定对应 SQL 引擎。"),
             ("确定性校验", "先检查表字段、JOIN 与只读边界，再决定是否允许后续执行。"),
-            ("受控执行", "仅对白名单只读数据源开放，服务端强制超时、行数上限和审计。"),
+            ("受控执行", "执行权限与 Schema 访问分离，服务端强制超时、行数上限和审计。"),
         ]
     )
 
@@ -69,6 +70,7 @@ def render() -> None:
     if selected:
         st.session_state["text2sql_question"] = selected.get("question", "")
         st.session_state["text2sql_schema_context"] = selected.get("schema", "")
+        st.session_state["text2sql_schema_source"] = MANUAL_SCHEMA_OPTION
         st.session_state.pop("text2sql_last_result", None)
         record_activity("Text2SQL", f"加载{selected.get('tag', '示例')}示例")
 
@@ -80,27 +82,72 @@ def render() -> None:
             "order_info(order_id bigint, user_id bigint, amount decimal(18,2), create_time timestamp)"
         ),
     )
+    st.session_state.setdefault("text2sql_schema_source", MANUAL_SCHEMA_OPTION)
+
+    datasource_config = _load_datasource_config()
+    available_datasources = [
+        item
+        for item in datasource_config.get("datasources", [])
+        if item.get("available") is True
+    ]
+    datasource_names = [item["name"] for item in available_datasources]
+    source_options = [MANUAL_SCHEMA_OPTION, *datasource_names]
+    if st.session_state.get("text2sql_schema_source") not in source_options:
+        st.session_state["text2sql_schema_source"] = MANUAL_SCHEMA_OPTION
 
     left, right = st.columns([1, 1])
     with left:
         question = st.text_area("业务需求", key="text2sql_question", height=120)
-        schema_context = st.text_area(
-            "表结构上下文",
-            key="text2sql_schema_context",
-            height=220,
+        schema_source = st.selectbox(
+            "Schema 来源",
+            source_options,
+            key="text2sql_schema_source",
         )
-        engine_label = st.selectbox("SQL 引擎", list(ENGINE_OPTIONS.keys()))
+        datasource: str | None = None
+        selected_engine: str | None = None
+        schema_context: str | None = None
+
+        if schema_source == MANUAL_SCHEMA_OPTION:
+            schema_context = st.text_area(
+                "表结构上下文",
+                key="text2sql_schema_context",
+                height=220,
+            )
+            engine_label = st.selectbox("SQL 引擎", list(ENGINE_OPTIONS.keys()))
+            selected_engine = ENGINE_OPTIONS[engine_label]
+        else:
+            datasource = schema_source
+            snapshot = _load_datasource_schema(datasource)
+            if snapshot:
+                selected_engine = snapshot.get("engine")
+                st.caption(
+                    f"自动发现 {snapshot.get('table_count', 0)} 张表 · "
+                    f"引擎 {selected_engine or '-'} · "
+                    f"Schema fingerprint {str(snapshot.get('fingerprint', ''))[:12]}"
+                )
+                st.code(snapshot.get("schema_context", ""), language="sql")
+            else:
+                st.warning("当前数据源 Schema 不可读取，请改用手工 Schema。")
+
         use_rag = st.checkbox("使用知识库上下文", value=False)
 
     with right:
         if st.button("生成 SQL", type="primary"):
             try:
-                result = get_client().text2sql(
-                    question,
-                    ENGINE_OPTIONS[engine_label],
-                    schema_context,
-                    use_rag=use_rag,
-                )
+                if datasource:
+                    result = get_client().text2sql(
+                        question,
+                        engine=selected_engine,
+                        datasource=datasource,
+                        use_rag=use_rag,
+                    )
+                else:
+                    result = get_client().text2sql(
+                        question,
+                        selected_engine,
+                        schema_context,
+                        use_rag=use_rag,
+                    )
                 st.session_state["text2sql_last_result"] = result
                 record_activity("Text2SQL", f"生成 SQL：{question[:28]}")
             except Exception as exc:
@@ -111,13 +158,33 @@ def render() -> None:
             _render_result(result)
 
 
+def _load_datasource_config() -> dict:
+    try:
+        return get_client().list_query_datasources()
+    except Exception:
+        return {"execution_enabled": False, "datasources": []}
+
+
+def _load_datasource_schema(datasource: str) -> dict | None:
+    try:
+        return get_client().get_query_datasource_schema(datasource)
+    except Exception:
+        return None
+
+
 def _render_result(result: dict) -> None:
     sql = result.get("sql", "")
     validation = result.get("validation", {})
+    metadata = result.get("metadata", {})
 
     st.subheader("生成 SQL")
     st.code(sql, language="sql")
     st.download_button("下载 SQL", sql, file_name="query.sql")
+    if metadata.get("schema_source") == "datasource":
+        st.caption(
+            f"Schema 来源：{metadata.get('datasource', '-')} · "
+            f"fingerprint {str(metadata.get('schema_fingerprint', ''))[:12]}"
+        )
     st.subheader("生成说明")
     st.write(result.get("explanation", ""))
     st.subheader("校验结果")
@@ -130,10 +197,17 @@ def _render_result(result: dict) -> None:
         st.warning("SQL 未通过静态校验，因此不会提供执行入口。")
         return
 
-    _render_governed_execution(sql)
+    _render_governed_execution(
+        sql,
+        preferred_datasource=metadata.get("datasource"),
+    )
 
 
-def _render_governed_execution(sql: str) -> None:
+def _render_governed_execution(
+    sql: str,
+    *,
+    preferred_datasource: str | None = None,
+) -> None:
     st.subheader("受控只读执行")
     try:
         config = get_client().list_query_datasources()
@@ -148,17 +222,28 @@ def _render_governed_execution(sql: str) -> None:
     ]
     if not config.get("execution_enabled") or not available:
         st.info(
-            "当前未启用白名单只读数据源。项目默认禁止执行模型生成的 SQL；"
-            "零售演示可先初始化 SQLite 数据库并显式开启执行能力。"
+            "当前未启用 SQL 执行能力。Schema 自动发现仍可用于生成和审核；"
+            "零售演示可先初始化 SQLite 数据库并显式开启只读执行。"
         )
         return
 
     datasource_names = [item["name"] for item in available]
+    default_index = (
+        datasource_names.index(preferred_datasource)
+        if preferred_datasource in datasource_names
+        else 0
+    )
     datasource = st.selectbox(
         "只读数据源",
         datasource_names,
+        index=default_index,
         key="text2sql_execution_datasource",
     )
+    if preferred_datasource and datasource != preferred_datasource:
+        st.warning(
+            "当前执行数据源与生成 SQL 时使用的 Schema 数据源不同。"
+            "建议返回生成区重新选择目标数据源，避免跨库误执行。"
+        )
     max_rows = st.number_input(
         "最大返回行数",
         min_value=1,
