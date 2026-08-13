@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends
 
-from backend.app.core.settings import Settings
+from backend.app.core.settings import ProviderName, Settings
 from backend.app.presentation.api.dependencies.providers import get_app_settings
 from backend.app.presentation.api.schemas.knowledge import RuntimeConfigResponse
 
@@ -21,6 +21,7 @@ def runtime_config(settings: Settings = Depends(get_app_settings)) -> RuntimeCon
         gpu_enabled=settings.runtime.gpu_enabled,
         cpu_only=settings.runtime.cpu_only,
         default_llm_provider=settings.llm.default_provider.value,
+        default_llm_model=_active_llm_model(settings),
         embedding_model=settings.embeddings.default_model,
         vector_store="chromadb",
         capabilities={
@@ -31,3 +32,11 @@ def runtime_config(settings: Settings = Depends(get_app_settings)) -> RuntimeCon
             "read_only_query_execution": settings.query_execution.enabled,
         },
     )
+
+
+def _active_llm_model(settings: Settings) -> str:
+    if settings.llm.default_provider is ProviderName.OPENAI:
+        return settings.openai.chat_model
+    if settings.llm.default_provider is ProviderName.OLLAMA:
+        return settings.ollama.chat_model
+    return settings.deepseek.chat_model
