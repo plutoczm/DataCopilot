@@ -39,41 +39,6 @@ x-backend-env: &backend-env
   DATACOPILOT_QUERY_EXECUTION__TIMEOUT_MS: ${QUERY_EXECUTION_TIMEOUT_MS:-3000}
 
 services:
-  chromadb:
-    image: chromadb/chroma:0.5.23
-    container_name: datacopilot-chromadb
-    restart: unless-stopped
-    environment:
-      IS_PERSISTENT: "TRUE"
-      PERSIST_DIRECTORY: /chroma/chroma
-      ANONYMIZED_TELEMETRY: "FALSE"
-      CHROMA_SERVER_HOST: 0.0.0.0
-      CHROMA_SERVER_HTTP_PORT: "8000"
-    ports:
-      - "${CHROMADB_PORT:-8001}:8000"
-    volumes:
-      - type: bind
-        source: ./data/chromadb
-        target: /chroma/chroma
-    healthcheck:
-      test:
-        - CMD-SHELL
-        - python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/v1/heartbeat', timeout=5)"
-      interval: 30s
-      timeout: 10s
-      retries: 5
-      start_period: 30s
-    deploy:
-      resources:
-        limits:
-          cpus: "2.0"
-          memory: 4G
-    cpus: "2.0"
-    mem_limit: 4g
-    networks:
-      - datacopilot
-    logging: *common-logging
-
   backend:
     build:
       context: .
@@ -87,9 +52,6 @@ services:
     env_file:
       - docker/.env.production
     environment: *backend-env
-    depends_on:
-      chromadb:
-        condition: service_healthy
     ports:
       - "${BACKEND_PORT:-8000}:8000"
     volumes:
