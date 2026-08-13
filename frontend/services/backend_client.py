@@ -160,26 +160,39 @@ class BackendClient:
     def text2sql(
         self,
         question: str,
-        engine: str,
-        schema_context: str,
+        engine: str | None = None,
+        schema_context: str | None = None,
         *,
+        datasource: str | None = None,
         use_rag: bool = False,
     ) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "question": question,
+            "use_rag": use_rag,
+        }
+        if engine:
+            payload["engine"] = engine
+        if schema_context:
+            payload["schema_context"] = schema_context
+        if datasource:
+            payload["datasource"] = datasource
         return self._json(
             self.client.post(
                 "/api/v1/text2sql",
-                json={
-                    "question": question,
-                    "engine": engine,
-                    "schema_context": schema_context,
-                    "use_rag": use_rag,
-                },
+                json=payload,
             )
         )
 
     def list_query_datasources(self) -> dict[str, Any]:
         return self._json(
             self.client.get("/api/v1/query-execution/datasources")
+        )
+
+    def get_query_datasource_schema(self, datasource: str) -> dict[str, Any]:
+        return self._json(
+            self.client.get(
+                f"/api/v1/query-execution/datasources/{datasource}/schema"
+            )
         )
 
     def execute_query(
