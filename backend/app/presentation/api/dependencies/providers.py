@@ -12,17 +12,11 @@ from backend.app.application.text2sql.text2sql_service import Text2SQLService
 from backend.app.application.warehouse_design.design_service import WarehouseDesignService
 from backend.app.core.config import get_settings
 from backend.app.core.settings import ProviderName, Settings
-from backend.app.domain.ports.llm_provider import LLMProvider, TaskType
+from backend.app.domain.ports.llm_provider import LLMProvider
 from backend.app.domain.ports.vector_store import VectorStore
 from backend.app.infrastructure.document_loaders import DocumentLoaderFactory
 from backend.app.infrastructure.embeddings import BGEM3EmbeddingProvider, EmbeddingProvider
-from backend.app.infrastructure.llm import (
-    DeepSeekProvider,
-    OllamaProvider,
-    OpenAIProvider,
-    RoutingLLMProvider,
-    TaskBoundLLMProvider,
-)
+from backend.app.infrastructure.llm import DeepSeekProvider, OllamaProvider, OpenAIProvider
 from backend.app.infrastructure.vectorstore import ChromaDBVectorStore
 
 
@@ -78,48 +72,22 @@ def get_embedding_provider(settings: Settings = None) -> EmbeddingProvider:
 
 
 def get_llm_provider(settings: Settings = None) -> LLMProvider:
+    """根据单一运行时配置选择 LLM provider。
+
+    业务服务只依赖统一 LLMProvider 端口；模型切换发生在应用启动边界，
+    避免把任务级模型路由逻辑扩散到 RAG、Text2SQL 等业务服务内部。
+    """
+
     global _llm_provider
     if _llm_provider is None:
         resolved = settings or get_app_settings()
-        if resolved.llm.routing_enabled:
-            cloud_name = resolved.llm.cloud_provider or resolved.llm.default_provider
-            cloud = _build_cloud_provider(resolved, cloud_name)
-            if resolved.local.enabled:
-                local = OpenAIProvider(config=resolved.local, provider_name="local")
-            else:
-                local = OllamaProvider(resolved)
-            _llm_provider = RoutingLLMProvider(
-                local=local,
-                cloud=cloud,
-                local_tasks=set(resolved.local.routing_tasks),
-                fallback_on_error=resolved.llm.routing_fallback_to_cloud,
-            )
-        elif resolved.llm.default_provider is ProviderName.OLLAMA:
+        if resolved.llm.default_provider is ProviderName.OLLAMA:
             _llm_provider = OllamaProvider(resolved)
         elif resolved.llm.default_provider is ProviderName.OPENAI:
             _llm_provider = OpenAIProvider(config=resolved.openai, provider_name="openai")
-        elif resolved.llm.default_provider is ProviderName.LOCAL:
-            _llm_provider = OpenAIProvider(config=resolved.local, provider_name="local")
         else:
             _llm_provider = DeepSeekProvider(resolved)
     return _llm_provider
-
-
-def _build_cloud_provider(resolved: Settings, provider_name: ProviderName) -> LLMProvider:
-    if provider_name is ProviderName.OPENAI:
-        return OpenAIProvider(config=resolved.openai, provider_name="openai")
-    if provider_name is ProviderName.OLLAMA:
-        return OllamaProvider(resolved)
-    if provider_name is ProviderName.LOCAL:
-        return OpenAIProvider(config=resolved.local, provider_name="local")
-    return DeepSeekProvider(resolved)
-
-
-def _task_bound(provider: LLMProvider, task: TaskType) -> LLMProvider:
-    """按业务任务绑定 provider；仅在多 LLM 路由开启时生效。"""
-    if get_app_settings().llm.routing_enabled:
-        return TaskBoundLLMProvider(provider, task)
-    return provider
 
 
 def get_document_ingestion_service() -> DocumentIngestionService:
@@ -142,14 +110,14 @@ def get_rag_service() -> RAGService:
     return RAGService(
         retrieval_service=retrieval_service,
         citation_service=CitationService(),
-        llm_provider=_task_bound(get_llm_provider(settings), TaskType.RAG),
+        llm_provider=get_llm_provider(settings),
     )
 
 
 def get_text2sql_service() -> Text2SQLService:
     settings = get_app_settings()
     return Text2SQLService(
-        llm_provider=_task_bound(get_llm_provider(settings), TaskType.TEXT2SQL),
+        llm_provider=get_llm_provider(settings),
         rag_service=get_rag_service(),
     )
 
@@ -157,7 +125,7 @@ def get_text2sql_service() -> Text2SQLService:
 def get_sql_review_service() -> SQLReviewService:
     settings = get_app_settings()
     return SQLReviewService(
-        llm_provider=_task_bound(get_llm_provider(settings), TaskType.SQL_REVIEW),
+        llm_provider=get_llm_provider(settings),
         text2sql_service=get_text2sql_service(),
     )
 
@@ -165,7 +133,7 @@ def get_sql_review_service() -> SQLReviewService:
 def get_warehouse_design_service() -> WarehouseDesignService:
     settings = get_app_settings()
     return WarehouseDesignService(
-        llm_provider=_task_bound(get_llm_provider(settings), TaskType.WAREHOUSE_DESIGN),
+        llm_provider=get_llm_provider(settings),
         rag_service=get_rag_service(),
         text2sql_service=get_text2sql_service(),
         sql_review_service=get_sql_review_service(),
@@ -181,6 +149,6 @@ def get_agent_graph() -> AgentGraph:
             text2sql_service=get_text2sql_service(),
             sql_review_service=get_sql_review_service(),
             warehouse_design_service=get_warehouse_design_service(),
-            llm_provider=_task_bound(get_llm_provider(settings), TaskType.GENERAL_CHAT),
+            llm_provider=get_llm_provider(settings),
         )
     return _agent_graph
