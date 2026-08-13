@@ -4,12 +4,12 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 
 from backend.app.application.rag.document_ingestion_service import DocumentIngestionService
+from backend.app.application.rag.document_registry import DocumentRegistry
 from backend.app.application.rag.rag_service import RAGService
 from backend.app.core.settings import Settings
 from backend.app.domain.ports.vector_store import VectorStore
 from backend.app.presentation.api.dependencies.providers import (
     DEFAULT_KNOWLEDGE_COLLECTION,
-    DocumentRegistry,
     get_app_settings,
     get_document_ingestion_service,
     get_document_registry,
@@ -108,7 +108,7 @@ def delete_document(
     registry: DocumentRegistry = Depends(get_document_registry),
     vector_store: VectorStore = Depends(get_vector_store),
 ) -> DeleteResponse:
-    existing = registry.documents.get(document_id)
+    existing = registry.get(document_id)
     if existing is None:
         raise HTTPException(status_code=404, detail="Document not found")
     vector_store.delete_documents(

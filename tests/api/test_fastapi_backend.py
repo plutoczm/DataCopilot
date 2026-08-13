@@ -5,15 +5,11 @@ from fastapi.testclient import TestClient
 
 from backend.app.application.rag.models import Citation, IngestionResult, RAGResponse
 from backend.app.core.settings import Settings
-from backend.app.domain.ports.llm_provider import (
-    LLMHealthStatus,
-    LLMUsage,
-)
+from backend.app.domain.ports.llm_provider import LLMHealthStatus, LLMUsage
 from backend.app.domain.ports.vector_store import CollectionStats
 from backend.app.infrastructure.vectorstore.exceptions import CollectionNotFoundError
 from backend.app.main import create_app
 from backend.app.presentation.api.dependencies.providers import (
-    DocumentRegistry,
     get_app_settings,
     get_document_ingestion_service,
     get_document_registry,
@@ -21,6 +17,23 @@ from backend.app.presentation.api.dependencies.providers import (
     get_rag_service,
     get_vector_store,
 )
+
+
+class FakeDocumentRegistry:
+    def __init__(self) -> None:
+        self.documents: dict[str, IngestionResult] = {}
+
+    def add(self, result: IngestionResult) -> None:
+        self.documents[result.document_id] = result
+
+    def list(self) -> list[IngestionResult]:
+        return list(self.documents.values())
+
+    def get(self, document_id: str) -> IngestionResult | None:
+        return self.documents.get(document_id)
+
+    def delete(self, document_id: str) -> bool:
+        return self.documents.pop(document_id, None) is not None
 
 
 class FakeLLM:
@@ -130,7 +143,7 @@ def make_client(
     ingestion_service: FakeIngestionService | None = None,
 ) -> TestClient:
     app = create_app()
-    registry = DocumentRegistry()
+    registry = FakeDocumentRegistry()
     if settings is not None:
         app.dependency_overrides[get_app_settings] = lambda: settings
     app.dependency_overrides[get_llm_provider] = lambda: FakeLLM()
@@ -145,9 +158,7 @@ def make_client(
 
 def test_root_endpoint_returns_service_metadata() -> None:
     client = make_client()
-
     response = client.get("/")
-
     assert response.status_code == 200
     assert response.json() == {
         "service": "DataPilot-AI",
@@ -160,9 +171,7 @@ def test_root_endpoint_returns_service_metadata() -> None:
 
 def test_health_endpoint_returns_structured_status() -> None:
     client = make_client()
-
     response = client.get("/health")
-
     assert response.status_code == 200
     payload = response.json()
     assert payload["service"] == "DataPilot-AI"
@@ -173,9 +182,7 @@ def test_health_endpoint_returns_structured_status() -> None:
 
 def test_health_endpoint_degrades_when_default_collection_is_missing() -> None:
     client = make_client(vector_store=MissingCollectionVectorStore())
-
     response = client.get("/health")
-
     assert response.status_code == 200
     payload = response.json()
     assert payload["status"] == "degraded"
@@ -186,9 +193,7 @@ def test_health_endpoint_degrades_when_default_collection_is_missing() -> None:
 
 def test_docs_endpoint_returns_swagger_ui() -> None:
     client = make_client()
-
     response = client.get("/docs")
-
     assert response.status_code == 200
     assert "text/html" in response.headers["content-type"]
     assert "Swagger UI" in response.text
@@ -197,39 +202,41 @@ def test_docs_endpoint_returns_swagger_ui() -> None:
 
 def test_openapi_schema_includes_expected_api_routes() -> None:
     client = make_client()
-
     response = client.get("/openapi.json")
-
     assert response.status_code == 200
-    assert response.headers["content-type"].startswith("application/json")
     schema = response.json()
     assert schema["openapi"].startswith("3.")
     assert schema["info"]["title"] == "DataPilot-AI"
-    assert "/health" in schema["paths"]
-    assert "/api/v1/chat/stream" in schema["paths"]
-    assert "/api/v1/knowledge/documents" in schema["paths"]
-    assert "/api/v1/knowledge/query" in schema["paths"]
-    assert "/api/v1/text2sql" in schema["paths"]
-    assert "/api/v1/sql-review" in schema["paths"]
-    assert "/api/v1/warehouse-design" in schema["paths"]
-    assert "/api/v1/agent/chat" in schema["paths"]
-    assert "/api/v1/agent/chat/stream" in schema["paths"]
+    for path in (
+        "/health",
+        "/api/v1/chat/stream",
+        "/api/v1/knowledge/documents",
+        "/api/v1/knowledge/query",
+        "/api/v1/text2sql",
+        "/api/v1/sql-review",
+        "/api/v1/query-execution",
+        "/api/v1/query-execution/datasources",
+        "/api/v1/warehouse-design",
+        "/api/v1/agent/chat",
+        "/api/v1/agent/chat/stream",
+    ):
+        assert path in schema["paths"]
 
 
 def test_runtime_config_does_not_expose_secrets() -> None:
     client = make_client()
-
     response = client.get("/api/v1/config/runtime")
-
     assert response.status_code == 200
     payload = response.json()
     assert payload["default_llm_provider"] == "deepseek"
     assert "api_key" not in json.dumps(payload).lower()
     assert payload["capabilities"]["rag"] is True
+    assert payload["capabilities"]["read_only_query_execution"] is False
 
 
 def test_document_upload_list_and_delete() -> None:
-    client = make_client()
+    vector_store = FakeVectorStore()
+    client = make_client(vector_store=vector_store)
 
     upload = client.post(
         "/api/v1/knowledge/documents",
@@ -248,6 +255,10 @@ def test_document_upload_list_and_delete() -> None:
     deleted = client.delete("/api/v1/knowledge/documents/doc-1")
     assert deleted.status_code == 200
     assert deleted.json()["deleted"] is True
+    assert vector_store.deleted_ids == ["doc-1:0"]
+
+    missing = client.delete("/api/v1/knowledge/documents/doc-1")
+    assert missing.status_code == 404
 
 
 def test_document_upload_stages_file_under_configured_temp_dir() -> None:
@@ -260,7 +271,6 @@ def test_document_upload_stages_file_under_configured_temp_dir() -> None:
         data={"collection_name": "kb", "domain": "spark", "tags": "spark,aqe"},
         files={"file": ("spark.txt", b"Spark AQE reduces shuffle.", "text/plain")},
     )
-
     assert upload.status_code == 201
     assert ingestion_service.seen_path is not None
     assert ingestion_service.seen_path.is_relative_to(settings.paths.temp_dir)
@@ -268,12 +278,10 @@ def test_document_upload_stages_file_under_configured_temp_dir() -> None:
 
 def test_knowledge_query_returns_answer_and_citations() -> None:
     client = make_client()
-
     response = client.post(
         "/api/v1/knowledge/query",
         json={"question": "How does Spark AQE help?", "collection_name": "kb"},
     )
-
     assert response.status_code == 200
     payload = response.json()
     assert payload["answer"] == "Spark AQE reduces shuffle work."
@@ -283,14 +291,12 @@ def test_knowledge_query_returns_answer_and_citations() -> None:
 
 def test_chat_stream_returns_sse_events() -> None:
     client = make_client()
-
     with client.stream(
         "POST",
         "/api/v1/chat/stream",
         json={"message": "How does Spark AQE help?", "collection_name": "kb"},
     ) as response:
         body = "".join(response.iter_text())
-
     assert response.status_code == 200
     assert "event: token" in body
     assert "Spark AQE reduces shuffle work." in body
@@ -300,9 +306,7 @@ def test_chat_stream_returns_sse_events() -> None:
 
 def test_validation_errors_use_consistent_response_format() -> None:
     client = make_client()
-
     response = client.post("/api/v1/knowledge/query", json={"question": ""})
-
     assert response.status_code == 422
     payload = response.json()
     assert payload["error"]["code"] == "validation_error"
@@ -311,12 +315,10 @@ def test_validation_errors_use_consistent_response_format() -> None:
 
 def test_unhandled_errors_use_consistent_response_format() -> None:
     client = make_client()
-
     response = client.post(
         "/api/v1/knowledge/query",
         json={"question": "explode", "collection_name": "kb"},
     )
-
     assert response.status_code == 500
     payload = response.json()
     assert payload["error"]["code"] == "internal_server_error"

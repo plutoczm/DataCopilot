@@ -1,11 +1,9 @@
-from dataclasses import dataclass, field
-
 from backend.app.application.agent.graph import AgentGraph
 from backend.app.application.query_execution.service import QueryExecutionService
 from backend.app.application.rag.chunking_service import ChunkingService
 from backend.app.application.rag.citation_service import CitationService
 from backend.app.application.rag.document_ingestion_service import DocumentIngestionService
-from backend.app.application.rag.models import IngestionResult
+from backend.app.application.rag.document_registry import DocumentRegistry
 from backend.app.application.rag.rag_service import RAGService
 from backend.app.application.rag.retrieval_service import RetrievalService
 from backend.app.application.sql_review.sql_review_service import SQLReviewService
@@ -19,30 +17,17 @@ from backend.app.infrastructure.document_loaders import DocumentLoaderFactory
 from backend.app.infrastructure.embeddings import BGEM3EmbeddingProvider, EmbeddingProvider
 from backend.app.infrastructure.llm import DeepSeekProvider, OllamaProvider, OpenAIProvider
 from backend.app.infrastructure.query_execution import SQLiteReadOnlyExecutor
+from backend.app.infrastructure.registry import SQLiteDocumentRegistry
 from backend.app.infrastructure.vectorstore import ChromaDBVectorStore
 
 
 DEFAULT_KNOWLEDGE_COLLECTION = "knowledge_base"
 
 
-@dataclass
-class DocumentRegistry:
-    documents: dict[str, IngestionResult] = field(default_factory=dict)
-
-    def add(self, result: IngestionResult) -> None:
-        self.documents[result.document_id] = result
-
-    def list(self) -> list[IngestionResult]:
-        return list(self.documents.values())
-
-    def delete(self, document_id: str) -> bool:
-        return self.documents.pop(document_id, None) is not None
-
-
-_registry = DocumentRegistry()
 _vector_store: VectorStore | None = None
 _embedding_provider: EmbeddingProvider | None = None
 _llm_provider: LLMProvider | None = None
+_document_registry: DocumentRegistry | None = None
 _query_execution_service: QueryExecutionService | None = None
 _agent_graph: AgentGraph | None = None
 
@@ -52,7 +37,12 @@ def get_app_settings() -> Settings:
 
 
 def get_document_registry() -> DocumentRegistry:
-    return _registry
+    global _document_registry
+    if _document_registry is None:
+        settings = get_app_settings()
+        registry_path = settings.paths.data_dir / "metadata" / "knowledge_registry.db"
+        _document_registry = SQLiteDocumentRegistry(registry_path)
+    return _document_registry
 
 
 def get_vector_store(settings: Settings = None) -> VectorStore:
@@ -75,11 +65,7 @@ def get_embedding_provider(settings: Settings = None) -> EmbeddingProvider:
 
 
 def get_llm_provider(settings: Settings = None) -> LLMProvider:
-    """根据单一运行时配置选择 LLM provider。
-
-    业务服务只依赖统一 LLMProvider 端口；模型切换发生在应用启动边界，
-    避免把任务级模型路由逻辑扩散到 RAG、Text2SQL 等业务服务内部。
-    """
+    """Select one runtime LLM provider at the application composition root."""
 
     global _llm_provider
     if _llm_provider is None:
@@ -94,10 +80,10 @@ def get_llm_provider(settings: Settings = None) -> LLMProvider:
 
 
 def get_query_execution_service() -> QueryExecutionService:
-    """FastAPI dependency for the governed query execution service.
+    """FastAPI dependency for governed read-only query execution.
 
-    Keep this dependency parameter-free. Adding a complex Settings parameter here would make
-    FastAPI infer an additional request body field and silently change the public POST contract.
+    Keep this dependency parameter-free. A complex Settings argument would be inferred by
+    FastAPI as another body parameter and silently change the public POST contract.
     """
 
     global _query_execution_service
