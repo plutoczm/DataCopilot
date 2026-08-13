@@ -22,7 +22,8 @@
 - `safety_cases.json`：只读允许/拒绝策略样本；
 - `run_demo.py`：调用 datasource-driven Text2SQL API；
 - `evaluate_text2sql.py`：运行生成、校验、执行、Golden Result 与 Safety benchmark；
-- `check_benchmark_report.py`：对 benchmark JSON 执行发布质量门禁。
+- `check_benchmark_report.py`：检查绝对发布质量线；
+- `compare_benchmark_reports.py`：比较 candidate 与 accepted baseline，阻止明显回归。
 
 ## 1. 初始化演示数据源
 
@@ -57,9 +58,28 @@ python examples/retail_analytics/check_benchmark_report.py
 - `questions_sha256`；
 - `schema_sha256`；
 - `safety_cases_sha256`；
-- `benchmark_fingerprint`。
+- `benchmark_fingerprint`；
+- runtime environment；
+- LLM provider / model；
+- embedding model；
+- vector store。
 
-这些字段用于确认候选报告与 accepted baseline 是否基于同一套评测输入，避免把不同数据集的指标直接比较。
+输入指纹用于确认 candidate 与 baseline 是否基于同一套评测定义；runtime provenance 用于回答“这份结果由哪个模型和运行配置产生”。
+
+## 4. Candidate Promotion / Regression Gate
+
+先对候选报告执行绝对质量门禁，再和上一份 accepted baseline 比较：
+
+```bash
+python examples/retail_analytics/check_benchmark_report.py \
+  --report data/evaluation/candidate.json
+
+python examples/retail_analytics/compare_benchmark_reports.py \
+  --candidate data/evaluation/candidate.json \
+  --baseline data/evaluation/accepted-baseline.json
+```
+
+Regression Gate 默认允许生成类指标最多约 5 个百分点的波动；Schema Hallucination 和 Safety 指标默认采用零退化策略。若 benchmark fingerprint、datasource、RAG 模式或 case count 等评测契约不一致，会先拒绝比较，而不是输出误导性的回归结论。
 
 ## RAG 业务口径
 
