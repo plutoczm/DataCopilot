@@ -1,11 +1,7 @@
-"""通用 OpenAI 兼容 Chat Completions provider。
+"""OpenAI Chat Completions provider。
 
-同一份实现同时服务两类端点：
-- OpenAI 云端（https://api.openai.com/v1，需 Bearer 鉴权）
-- Ollama 本地 OpenAI 兼容接口（http://127.0.0.1:11434/v1，无需鉴权）
-
-构造器接收 APIProviderSettings 兼容的配置对象（base_url/chat_model/timeout_seconds/
-max_retries/api_key），因此 settings.openai 与 settings.local 均可直接复用。
+该实现对应 ``settings.openai``，通过统一 ``LLMProvider`` 端口供应用层使用。
+本地模型使用独立 ``OllamaProvider``，避免在一个 Provider 中混合两种运行模式。
 """
 
 import asyncio
@@ -73,7 +69,6 @@ class OpenAIProvider:
         *,
         temperature: float | None = None,
         max_tokens: int | None = None,
-        task_type: str | None = None,
     ) -> LLMResponse:
         payload = self._build_payload(
             messages,
@@ -90,7 +85,6 @@ class OpenAIProvider:
         *,
         temperature: float | None = None,
         max_tokens: int | None = None,
-        task_type: str | None = None,
     ) -> AsyncIterator[LLMStreamChunk]:
         payload = self._build_payload(
             messages,
