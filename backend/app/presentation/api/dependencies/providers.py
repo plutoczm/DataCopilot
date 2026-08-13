@@ -29,6 +29,7 @@ _vector_store: VectorStore | None = None
 _embedding_provider: EmbeddingProvider | None = None
 _llm_provider: LLMProvider | None = None
 _document_registry: DocumentRegistry | None = None
+_query_executor: SQLiteReadOnlyExecutor | None = None
 _query_execution_service: QueryExecutionService | None = None
 _agent_graph: AgentGraph | None = None
 
@@ -80,6 +81,23 @@ def get_llm_provider(settings: Settings = None) -> LLMProvider:
     return _llm_provider
 
 
+def _get_query_executor() -> SQLiteReadOnlyExecutor:
+    global _query_executor
+    if _query_executor is None:
+        resolved = get_app_settings()
+        execution = resolved.query_execution
+        _query_executor = SQLiteReadOnlyExecutor(
+            name=execution.datasource_name,
+            database_path=execution.sqlite_path,
+        )
+    return _query_executor
+
+
+def _get_schema_catalogs() -> dict[str, SQLiteReadOnlyExecutor]:
+    executor = _get_query_executor()
+    return {executor.name: executor}
+
+
 def get_query_execution_service() -> QueryExecutionService:
     """FastAPI dependency for governed read-only query execution.
 
@@ -91,12 +109,10 @@ def get_query_execution_service() -> QueryExecutionService:
     if _query_execution_service is None:
         resolved = get_app_settings()
         execution = resolved.query_execution
-        executor = SQLiteReadOnlyExecutor(
-            name=execution.datasource_name,
-            database_path=execution.sqlite_path,
-        )
+        executor = _get_query_executor()
         _query_execution_service = QueryExecutionService(
-            executors={execution.datasource_name: executor},
+            executors={executor.name: executor},
+            schema_catalogs=_get_schema_catalogs(),
             enabled=execution.enabled,
             max_rows=execution.max_rows,
             timeout_ms=execution.timeout_ms,
@@ -142,6 +158,7 @@ def get_text2sql_service() -> Text2SQLService:
     return Text2SQLService(
         llm_provider=get_llm_provider(settings),
         rag_service=get_rag_service(),
+        schema_catalogs=_get_schema_catalogs(),
     )
 
 
