@@ -33,7 +33,7 @@ def render() -> None:
         [
             ("Schema 自动发现", "可直接选择白名单数据源，由后端读取表结构并绑定对应 SQL 引擎。"),
             ("确定性校验", "先检查表字段、JOIN 与只读边界，再决定是否允许后续执行。"),
-            ("受控执行", "执行权限与 Schema 访问分离，服务端强制超时、行数上限和审计。"),
+            ("受控执行", "执行权限与 Schema 访问分离，并用 fingerprint 防止生成后 Schema 漂移。"),
         ]
     )
 
@@ -200,6 +200,7 @@ def _render_result(result: dict) -> None:
     _render_governed_execution(
         sql,
         preferred_datasource=metadata.get("datasource"),
+        expected_schema_fingerprint=metadata.get("schema_fingerprint"),
     )
 
 
@@ -207,6 +208,7 @@ def _render_governed_execution(
     sql: str,
     *,
     preferred_datasource: str | None = None,
+    expected_schema_fingerprint: str | None = None,
 ) -> None:
     st.subheader("受控只读执行")
     try:
@@ -252,16 +254,27 @@ def _render_governed_execution(
         step=10,
         key="text2sql_execution_max_rows",
     )
+    if expected_schema_fingerprint and datasource == preferred_datasource:
+        st.caption(
+            "执行前会重新读取 Schema fingerprint；若生成后表结构发生变化，"
+            "后端将返回 409 schema_drift，要求重新生成并审核 SQL。"
+        )
     st.warning(
         "执行动作仍会由后端重新检查只读策略，并受数据库只读模式、超时、"
         "服务端最大行数和审计日志约束。"
     )
     if st.button("执行只读查询", key="text2sql_execute_query"):
         try:
+            fingerprint = (
+                expected_schema_fingerprint
+                if datasource == preferred_datasource
+                else None
+            )
             executed = get_client().execute_query(
                 datasource=datasource,
                 sql=sql,
                 max_rows=int(max_rows),
+                expected_schema_fingerprint=fingerprint,
             )
             st.success(
                 f"执行完成：{executed.get('row_count', 0)} 行，"
