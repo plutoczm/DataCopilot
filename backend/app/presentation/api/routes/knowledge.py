@@ -1,3 +1,4 @@
+import shutil
 import tempfile
 from pathlib import Path
 
@@ -30,6 +31,10 @@ from backend.app.presentation.api.schemas.knowledge import (
 
 router = APIRouter(prefix="/api/v1/knowledge", tags=["Knowledge Base"])
 
+UPLOAD_CHUNK_SIZE_BYTES = 1024 * 1024
+MAX_UPLOAD_SIZE_BYTES = 20 * 1024 * 1024
+SUPPORTED_UPLOAD_SUFFIXES = {".pdf", ".docx", ".txt", ".md", ".markdown"}
+
 
 @router.post(
     "/documents",
@@ -49,14 +54,14 @@ async def upload_document(
     catalog: DocumentCatalogService = Depends(get_document_catalog_service),
 ) -> DocumentUploadResponse:
     suffix = Path(file.filename or "").suffix.lower()
-    if suffix not in {".pdf", ".docx", ".txt", ".md", ".markdown"}:
+    if suffix not in SUPPORTED_UPLOAD_SUFFIXES:
         raise HTTPException(status_code=400, detail="Unsupported file type")
 
     settings.paths.temp_dir.mkdir(parents=True, exist_ok=True)
     temp_dir = Path(tempfile.mkdtemp(prefix="upload-", dir=settings.paths.temp_dir))
     temp_path = temp_dir / Path(file.filename or f"upload{suffix}").name
-    temp_path.write_bytes(await file.read())
     try:
+        await _stage_upload(file, temp_path)
         result = await ingestion_service.ingest_file(
             temp_path,
             collection_name=collection_name,
@@ -64,8 +69,7 @@ async def upload_document(
             tags=_parse_tags(tags),
         )
     finally:
-        temp_path.unlink(missing_ok=True)
-        temp_dir.rmdir()
+        shutil.rmtree(temp_dir, ignore_errors=True)
 
     catalog.register(result)
     return DocumentUploadResponse(
@@ -146,6 +150,28 @@ async def query_knowledge(
         metadata=response.metadata,
         token_usage=response.token_usage,
     )
+
+
+async def _stage_upload(file: UploadFile, destination: Path) -> int:
+    """Stream an uploaded file to a project-local staging path with hard bounds."""
+
+    bytes_written = 0
+    with destination.open("wb") as output:
+        while True:
+            chunk = await file.read(UPLOAD_CHUNK_SIZE_BYTES)
+            if not chunk:
+                break
+            bytes_written += len(chunk)
+            if bytes_written > MAX_UPLOAD_SIZE_BYTES:
+                raise HTTPException(
+                    status_code=413,
+                    detail=f"File exceeds {MAX_UPLOAD_SIZE_BYTES // (1024 * 1024)} MiB limit",
+                )
+            output.write(chunk)
+
+    if bytes_written == 0:
+        raise HTTPException(status_code=400, detail="Empty file is not allowed")
+    return bytes_written
 
 
 def _parse_tags(tags: str) -> list[str]:
