@@ -1,4 +1,5 @@
 import json
+import shutil
 from collections.abc import AsyncIterator, Iterator, Sequence
 from pathlib import Path
 from typing import Any
@@ -7,6 +8,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from backend.app.application.agent.graph import AgentGraph
+from backend.app.application.rag.document_catalog_service import DocumentCatalogService
 from backend.app.application.rag.models import Citation, IngestionResult, RAGResponse
 from backend.app.application.sql_review.models import RiskLevel, SQLReviewIssue, SQLReviewResult
 from backend.app.application.text2sql.models import SQLEngine, SQLValidationResult, Text2SQLResult
@@ -20,13 +22,13 @@ from backend.app.domain.ports.llm_provider import (
     LLMUsage,
 )
 from backend.app.domain.ports.vector_store import CollectionStats
+from backend.app.infrastructure.registry import SQLiteDocumentRegistry
 from backend.app.main import create_app
 from backend.app.presentation.api.dependencies.providers import (
-    DocumentRegistry,
     get_agent_graph,
     get_app_settings,
+    get_document_catalog_service,
     get_document_ingestion_service,
-    get_document_registry,
     get_llm_provider,
     get_rag_service,
     get_sql_review_service,
@@ -142,14 +144,17 @@ class IntegrationVectorStore:
         return CollectionStats(name=collection_name, document_count=len(self.state.uploaded_documents))
 
     def delete_documents(self, collection_name: str, ids, *, batch_size: int = 100) -> None:
-        for document_id in ids:
+        for chunk_id in ids:
+            document_id = str(chunk_id).split(":", 1)[0]
             self.state.uploaded_documents.pop(document_id, None)
             self.state.uploaded_text.pop(document_id, None)
 
 
 class IntegrationIngestionService:
-    def __init__(self, state: IntegrationState) -> None:
+    def __init__(self, state: IntegrationState, uploads_dir: Path) -> None:
         self.state = state
+        self.uploads_dir = uploads_dir
+        self.uploads_dir.mkdir(parents=True, exist_ok=True)
 
     async def ingest_file(
         self,
@@ -161,12 +166,14 @@ class IntegrationIngestionService:
     ) -> IngestionResult:
         document_id = f"doc-{len(self.state.uploaded_documents) + 1}"
         text = file_path.read_text(encoding="utf-8", errors="ignore")
+        stored_path = self.uploads_dir / f"{document_id}-{file_path.name}"
+        shutil.copy2(file_path, stored_path)
         result = IngestionResult(
             document_id=document_id,
             filename=file_path.name,
             file_type=file_path.suffix.lstrip(".") or "txt",
             domain=domain,
-            stored_path=file_path,
+            stored_path=stored_path,
             collection_name=collection_name,
             chunk_count=1,
         )
@@ -296,8 +303,43 @@ def integration_state() -> IntegrationState:
 
 
 @pytest.fixture
-def integration_services(integration_state: IntegrationState) -> dict[str, Any]:
+def integration_services(
+    integration_state: IntegrationState,
+    tmp_path: Path,
+) -> dict[str, Any]:
+    project_root = tmp_path / "integration-project"
+    settings = Settings(
+        _env_file=None,
+        paths={
+            "project_root": project_root,
+            "data_dir": "data",
+            "chromadb_dir": "data/chromadb",
+            "uploads_dir": "data/uploads",
+            "logs_dir": "data/logs",
+            "cache_dir": "data/cache",
+            "embeddings_dir": "data/embeddings",
+            "temp_dir": "data/temp",
+            "models_dir": "models",
+        },
+        logging={"file_path": "data/logs/datacopilot.log"},
+    )
+    settings.paths.uploads_dir.mkdir(parents=True, exist_ok=True)
+    settings.paths.temp_dir.mkdir(parents=True, exist_ok=True)
+
     llm = IntegrationLLMProvider()
+    vector_store = IntegrationVectorStore(integration_state)
+    ingestion = IntegrationIngestionService(
+        integration_state,
+        settings.paths.uploads_dir,
+    )
+    registry = SQLiteDocumentRegistry(
+        settings.paths.data_dir / "metadata" / "knowledge_registry.db"
+    )
+    catalog = DocumentCatalogService(
+        registry=registry,
+        vector_store=vector_store,
+        uploads_dir=settings.paths.uploads_dir,
+    )
     rag = IntegrationRAGService(integration_state)
     text2sql = IntegrationText2SQLService()
     sql_review = IntegrationSQLReviewService()
@@ -310,9 +352,11 @@ def integration_services(integration_state: IntegrationState) -> dict[str, Any]:
         llm_provider=llm,
     )
     return {
+        "settings": settings,
         "llm": llm,
-        "vector_store": IntegrationVectorStore(integration_state),
-        "ingestion": IntegrationIngestionService(integration_state),
+        "vector_store": vector_store,
+        "ingestion": ingestion,
+        "catalog": catalog,
         "rag": rag,
         "text2sql": text2sql,
         "sql_review": sql_review,
@@ -324,13 +368,11 @@ def integration_services(integration_state: IntegrationState) -> dict[str, Any]:
 @pytest.fixture
 def app_client(integration_services: dict[str, Any]) -> Iterator[TestClient]:
     app = create_app()
-    registry = DocumentRegistry()
-    settings = Settings(_env_file=None)
-    app.dependency_overrides[get_app_settings] = lambda: settings
+    app.dependency_overrides[get_app_settings] = lambda: integration_services["settings"]
     app.dependency_overrides[get_llm_provider] = lambda: integration_services["llm"]
     app.dependency_overrides[get_vector_store] = lambda: integration_services["vector_store"]
     app.dependency_overrides[get_document_ingestion_service] = lambda: integration_services["ingestion"]
-    app.dependency_overrides[get_document_registry] = lambda: registry
+    app.dependency_overrides[get_document_catalog_service] = lambda: integration_services["catalog"]
     app.dependency_overrides[get_rag_service] = lambda: integration_services["rag"]
     app.dependency_overrides[get_text2sql_service] = lambda: integration_services["text2sql"]
     app.dependency_overrides[get_sql_review_service] = lambda: integration_services["sql_review"]
