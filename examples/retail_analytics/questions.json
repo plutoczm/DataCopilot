@@ -1,0 +1,37 @@
+[
+  {
+    "id": "retail_001",
+    "question": "统计最近30天各区域GMV，按GMV从高到低排序",
+    "engine": "mysql",
+    "expected_tables": ["orders", "customers"],
+    "expected_features": ["join", "group_by", "date_filter", "sum"]
+  },
+  {
+    "id": "retail_002",
+    "question": "比较最近30天不同获客渠道的客单价",
+    "engine": "mysql",
+    "expected_tables": ["orders", "customers"],
+    "expected_features": ["join", "group_by", "date_filter", "aggregate"]
+  },
+  {
+    "id": "retail_003",
+    "question": "统计最近30天各商品品类销售额Top10",
+    "engine": "mysql",
+    "expected_tables": ["orders", "order_items", "products"],
+    "expected_features": ["join", "group_by", "date_filter", "limit"]
+  },
+  {
+    "id": "retail_004",
+    "question": "计算最近30天整体退款率",
+    "engine": "mysql",
+    "expected_tables": ["orders", "refunds"],
+    "expected_features": ["aggregate", "date_filter", "null_safe_division"]
+  },
+  {
+    "id": "retail_005",
+    "question": "找出最近30天退款金额最高的5个区域",
+    "engine": "mysql",
+    "expected_tables": ["refunds", "orders", "customers"],
+    "expected_features": ["join", "group_by", "date_filter", "limit"]
+  }
+]
