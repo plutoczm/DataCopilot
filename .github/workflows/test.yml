@@ -49,6 +49,9 @@ jobs:
         run: |
           python -m compileall -q backend frontend examples/retail_analytics
 
+      - name: Validate benchmark contract
+        run: python examples/retail_analytics/validate_benchmark_definition.py
+
       - name: Validate Docker Compose
         run: |
           docker compose --env-file docker/.env.production config --quiet
