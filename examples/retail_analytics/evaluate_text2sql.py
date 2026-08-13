@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 import time
 from pathlib import Path
@@ -22,6 +23,7 @@ from backend.app.application.evaluation import (  # noqa: E402
     Text2SQLBenchmarkReport,
     extract_referenced_tables,
     extract_schema_tables,
+    result_rows_equivalent,
 )
 
 
@@ -30,7 +32,7 @@ DEFAULT_REPORT = PROJECT_ROOT / "data" / "evaluation" / "retail_text2sql_report.
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Run the reproducible retail Text2SQL and safety benchmark."
+        description="Run the reproducible retail Text2SQL, result-oracle and safety benchmark."
     )
     parser.add_argument("--backend-url", default="http://127.0.0.1:8000")
     parser.add_argument("--datasource", default="retail_demo")
@@ -39,6 +41,11 @@ def main() -> None:
     parser.add_argument("--safety-cases", type=Path, default=HERE / "safety_cases.json")
     parser.add_argument("--report", type=Path, default=DEFAULT_REPORT)
     parser.add_argument("--use-rag", action="store_true")
+    parser.add_argument(
+        "--api-key",
+        default=os.getenv("DATACOPILOT_API_KEY", ""),
+        help="Optional X-API-Key used when API authentication is enabled.",
+    )
     args = parser.parse_args()
 
     backend_url = args.backend_url.rstrip("/")
@@ -46,8 +53,9 @@ def main() -> None:
     safety_cases = _load_json(args.safety_cases)
     schema_sql = args.schema.read_text(encoding="utf-8")
     allowed_tables = extract_schema_tables(schema_sql)
+    headers = {"X-API-Key": args.api_key.strip()} if args.api_key.strip() else None
 
-    with httpx.Client(timeout=90.0) as client:
+    with httpx.Client(timeout=90.0, headers=headers) as client:
         execution_ready = _execution_ready(client, backend_url, args.datasource)
         text_cases = [
             _run_text2sql_case(
@@ -55,7 +63,6 @@ def main() -> None:
                 backend_url=backend_url,
                 datasource=args.datasource,
                 item=item,
-                schema_sql=schema_sql,
                 allowed_tables=allowed_tables,
                 execution_ready=execution_ready,
                 use_rag=args.use_rag,
@@ -76,18 +83,22 @@ def main() -> None:
             else []
         )
 
+    text_report = Text2SQLBenchmarkReport.from_cases(text_cases)
     payload = {
         "metadata": {
             "backend_url": backend_url,
             "datasource": args.datasource,
             "execution_ready": execution_ready,
             "use_rag": args.use_rag,
+            "schema_source": "datasource",
+            "result_oracle": "golden_sql_result_set",
             "note": (
-                "Execution success is not semantic result accuracy. Add golden result "
-                "oracles before reporting business-answer accuracy."
+                "business_result_accuracy compares generated query rows with golden SQL rows. "
+                "The compact retail oracle ignores row order and column aliases, and should be "
+                "replaced by case-specific domain oracles for more complex production queries."
             ),
         },
-        "text2sql": Text2SQLBenchmarkReport.from_cases(text_cases).model_dump(),
+        "text2sql": text_report.model_dump(),
         "safety": SafetyPolicyReport.from_cases(safety_results).model_dump(),
         "cases": [item.model_dump(mode="json") for item in text_cases],
         "safety_cases": [item.model_dump(mode="json") for item in safety_results],
@@ -108,19 +119,19 @@ def _run_text2sql_case(
     backend_url: str,
     datasource: str,
     item: dict[str, Any],
-    schema_sql: str,
     allowed_tables: set[str],
     execution_ready: bool,
     use_rag: bool,
 ) -> Text2SQLBenchmarkCase:
+    golden_sql = str(item.get("golden_sql", "")).strip()
+    oracle_available = bool(golden_sql)
     started = time.perf_counter()
     try:
         response = client.post(
             f"{backend_url}/api/v1/text2sql",
             json={
                 "question": item["question"],
-                "engine": item.get("engine", "sqlite"),
-                "schema_context": schema_sql,
+                "datasource": datasource,
                 "use_rag": use_rag,
             },
         )
@@ -128,6 +139,7 @@ def _run_text2sql_case(
         return Text2SQLBenchmarkCase(
             case_id=item["id"],
             generation_succeeded=False,
+            result_oracle_available=oracle_available,
             expected_tables=set(item.get("expected_tables", [])),
             allowed_tables=allowed_tables,
             generation_latency_ms=_elapsed_ms(started),
@@ -139,6 +151,7 @@ def _run_text2sql_case(
         return Text2SQLBenchmarkCase(
             case_id=item["id"],
             generation_succeeded=False,
+            result_oracle_available=oracle_available,
             expected_tables=set(item.get("expected_tables", [])),
             allowed_tables=allowed_tables,
             generation_latency_ms=generation_latency,
@@ -153,6 +166,7 @@ def _run_text2sql_case(
         case_id=item["id"],
         generation_succeeded=True,
         validation_passed=validation_passed,
+        result_oracle_available=oracle_available,
         expected_tables=set(item.get("expected_tables", [])),
         referenced_tables=extract_referenced_tables(sql),
         allowed_tables=allowed_tables,
@@ -171,6 +185,27 @@ def _run_text2sql_case(
         result.execution_succeeded = execution.status_code == 200
         if execution.status_code != 200:
             result.error = f"Execution HTTP {execution.status_code}: {execution.text[:500]}"
+            return result
+
+        if golden_sql:
+            golden = client.post(
+                f"{backend_url}/api/v1/query-execution",
+                json={
+                    "datasource": datasource,
+                    "sql": golden_sql,
+                    "max_rows": 200,
+                },
+            )
+            if golden.status_code != 200:
+                result.error = (
+                    f"Golden execution HTTP {golden.status_code}: {golden.text[:500]}"
+                )
+                return result
+            result.result_match_attempted = True
+            result.result_matched = result_rows_equivalent(
+                list(execution.json().get("rows", [])),
+                list(golden.json().get("rows", [])),
+            )
     return result
 
 
