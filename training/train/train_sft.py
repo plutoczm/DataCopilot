@@ -4,6 +4,7 @@ import argparse
 import json
 from pathlib import Path
 
+import torch
 from datasets import load_dataset
 from peft import LoraConfig
 from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
@@ -28,11 +29,16 @@ def main() -> None:
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
 
+    compute_dtype_name = str(cfg.get("bnb_4bit_compute_dtype", "bfloat16"))
+    compute_dtype = getattr(torch, compute_dtype_name, None)
+    if compute_dtype is None:
+        raise ValueError(f"unsupported torch dtype: {compute_dtype_name}")
+
     quantization = BitsAndBytesConfig(
         load_in_4bit=True,
         bnb_4bit_quant_type=str(cfg.get("bnb_4bit_quant_type", "nf4")),
         bnb_4bit_use_double_quant=bool(cfg.get("bnb_4bit_use_double_quant", True)),
-        bnb_4bit_compute_dtype=str(cfg.get("bnb_4bit_compute_dtype", "bfloat16")),
+        bnb_4bit_compute_dtype=compute_dtype,
     )
     model = AutoModelForCausalLM.from_pretrained(
         model_name,
