@@ -2,8 +2,9 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 
-from sqlglot import exp, parse
+from sqlglot import exp, parse, tokenize
 from sqlglot.errors import ParseError
+from sqlglot.tokens import TokenType
 
 from backend.app.application.text2sql.models import (
     DatabaseSchema,
@@ -95,7 +96,7 @@ class SQLValidator:
                 )
             )
             issues.extend(self._detect_select_star(statement))
-            issues.extend(self._detect_join_issues(statement))
+            issues.extend(self._detect_join_issues(statement, sql=sql, engine=engine))
             issues.extend(self._detect_engine_warnings(statement, engine))
 
         issues = self._deduplicate(issues)
@@ -292,11 +293,14 @@ class SQLValidator:
     def _detect_join_issues(
         self,
         statement: exp.Expression,
+        *,
+        sql: str,
+        engine: SQLEngine,
     ) -> list[SQLValidationIssue]:
         issues: list[SQLValidationIssue] = []
-        for join in statement.find_all(exp.Join):
+        joins = list(statement.find_all(exp.Join))
+        for join in joins:
             kind = str(join.args.get("kind") or "").upper()
-            has_condition = join.args.get("on") is not None or bool(join.args.get("using"))
             if kind == "CROSS":
                 issues.append(
                     SQLValidationIssue(
@@ -305,14 +309,23 @@ class SQLValidator:
                         message="CROSS JOIN may create a Cartesian product.",
                     )
                 )
-            if not has_condition:
-                issues.append(
-                    SQLValidationIssue(
-                        code="missing_join_condition",
-                        severity="error",
-                        message="Every JOIN must include an ON or USING condition.",
-                    )
+
+        # SQLGlot may normalize a condition-less JOIN in some dialects instead of
+        # retaining a Join node. Token-level counting preserves the original safety
+        # contract without falling back to regex or inspecting string literals/comments.
+        tokens = tokenize(sql, read=DIALECT_BY_ENGINE[engine])
+        join_count = sum(token.token_type is TokenType.JOIN for token in tokens)
+        condition_count = sum(
+            token.token_type in {TokenType.ON, TokenType.USING} for token in tokens
+        )
+        if condition_count < join_count:
+            issues.append(
+                SQLValidationIssue(
+                    code="missing_join_condition",
+                    severity="error",
+                    message="Every JOIN must include an ON or USING condition.",
                 )
+            )
         return issues
 
     def _detect_engine_warnings(
