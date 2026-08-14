@@ -296,6 +296,7 @@ class SQLValidator:
         issues: list[SQLValidationIssue] = []
         for join in statement.find_all(exp.Join):
             kind = str(join.args.get("kind") or "").upper()
+            has_condition = join.args.get("on") is not None or bool(join.args.get("using"))
             if kind == "CROSS":
                 issues.append(
                     SQLValidationIssue(
@@ -304,8 +305,7 @@ class SQLValidator:
                         message="CROSS JOIN may create a Cartesian product.",
                     )
                 )
-                continue
-            if join.args.get("on") is None and not join.args.get("using"):
+            if not has_condition:
                 issues.append(
                     SQLValidationIssue(
                         code="missing_join_condition",
