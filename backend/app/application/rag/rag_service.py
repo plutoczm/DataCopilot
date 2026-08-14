@@ -34,6 +34,33 @@ class RAGService:
         self.citation_service = citation_service
         self.llm_provider = llm_provider
 
+    async def retrieve_context(
+        self,
+        question: str,
+        *,
+        collection_name: str,
+        top_k: int = 5,
+        metadata_filter: dict[str, str | int | float | bool] | None = None,
+        score_threshold: float | None = None,
+        retrieval_mode: RetrievalMode | str = RetrievalMode.HYBRID,
+    ) -> str | None:
+        """Return raw retrieved evidence without an intermediate LLM synthesis step.
+
+        Text2SQL should consume evidence, not another model's prose answer. This keeps
+        provenance visible and removes one avoidable hallucination/cost boundary.
+        """
+        retrieved = await self.retrieval_service.retrieve(
+            question,
+            collection_name=collection_name,
+            top_k=top_k,
+            metadata_filter=metadata_filter,
+            score_threshold=score_threshold,
+            retrieval_mode=retrieval_mode,
+        )
+        if not retrieved:
+            return None
+        return self._assemble_context(retrieved)
+
     async def answer(
         self,
         question: str,

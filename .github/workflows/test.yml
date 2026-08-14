@@ -44,10 +44,22 @@ jobs:
 
       - name: Compile Python modules
         run: |
-          python -m compileall -q backend frontend examples/retail_analytics
+          python -m compileall -q backend frontend examples/retail_analytics training
 
       - name: Validate benchmark contract
         run: python examples/retail_analytics/validate_benchmark_definition.py
+
+      - name: Validate fine-tuning dataset contract
+        run: |
+          rm -rf /tmp/datacopilot-sft
+          python training/data/build_text2sql_dataset.py \
+            --source training/data/sample_text2sql.jsonl \
+            --output-dir /tmp/datacopilot-sft
+          python training/data/validate_dataset.py \
+            /tmp/datacopilot-sft/train.jsonl \
+            /tmp/datacopilot-sft/validation.jsonl \
+            /tmp/datacopilot-sft/test.jsonl \
+            --benchmark-questions examples/retail_analytics/questions.json
 
       - name: Validate Docker Compose
         run: |

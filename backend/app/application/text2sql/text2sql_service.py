@@ -117,6 +117,7 @@ class Text2SQLService:
             "llm_model": llm_response.model,
             "rag_used": use_rag,
             "schema_table_count": len(schema.tables),
+            "confidence_source": "deterministic_validation_heuristic",
             **schema_metadata,
         }
         return Text2SQLResult(
@@ -199,11 +200,34 @@ class Text2SQLService:
     ) -> str | None:
         if not use_rag or self.rag_service is None:
             return None
+
+        retrieve_context = getattr(self.rag_service, "retrieve_context", None)
+        if callable(retrieve_context):
+            return await retrieve_context(
+                question,
+                collection_name=collection_name,
+                top_k=3,
+            )
+
+        # Backward-compatible fallback for test doubles or older RAG implementations.
         response = await self.rag_service.answer(
             question,
             collection_name=collection_name,
             top_k=3,
         )
+        if response.retrieved_chunks:
+            sections = []
+            for chunk in response.retrieved_chunks:
+                metadata = chunk.metadata
+                sections.append(
+                    "\n".join(
+                        [
+                            f"{metadata.filename}#chunk-{metadata.chunk_index}",
+                            chunk.content,
+                        ]
+                    )
+                )
+            return "\n\n".join(sections)
         return response.answer
 
     def _parse_llm_payload(self, content: str) -> dict[str, Any]:
@@ -237,16 +261,15 @@ class Text2SQLService:
 
     def _normalize_confidence(
         self,
-        value: Any,
+        _model_reported_value: Any,
         validation: SQLValidationResult,
     ) -> float:
-        try:
-            confidence = float(value)
-        except (TypeError, ValueError):
-            confidence = 0.6
-        confidence = min(1.0, max(0.0, confidence))
+        """Return a deterministic quality signal instead of trusting model self-reporting."""
         if not validation.is_valid:
-            confidence = min(confidence, 0.3)
-        elif validation.issues:
-            confidence = min(confidence, 0.85)
-        return round(confidence, 4)
+            return 0.2
+        warning_count = sum(issue.severity == "warning" for issue in validation.issues)
+        if warning_count == 0:
+            return 0.95
+        if warning_count == 1:
+            return 0.85
+        return 0.75
