@@ -55,7 +55,7 @@ class StubHTTPClient:
                     "intent": "GENERAL_CHAT",
                     "final_response": "done",
                     "result": {"answer": "done"},
-                    "routing_path": ["classify_intent", "general_chat", "format_response"],
+                    "routing_path": ["classify_intent", "planner", "general_chat", "format_response"],
                     "metadata": {},
                     "token_usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
                 }

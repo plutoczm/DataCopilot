@@ -64,6 +64,11 @@ def render() -> None:
         record_activity("智能问答", f"加载演示问题：{selected.get('title', '-')}")
 
     with st.expander("上下文设置", expanded=False):
+        user_id = st.text_input(
+            "用户 ID",
+            value="demo-user",
+            help="用于跨会话长期记忆和规则记忆；生产环境应由认证系统提供。",
+        )
         collection_name = st.text_input("知识库集合", value="knowledge_base")
         top_k = st.slider("Top K", min_value=1, max_value=20, value=5)
         engine = st.selectbox("SQL 引擎", ["hive", "spark_sql", "mysql", "clickhouse"])
@@ -103,6 +108,7 @@ def render() -> None:
                 top_k=top_k,
                 use_rag=use_rag,
                 session_id=st.session_state["agent_session_id"],
+                user_id=user_id or None,
                 retrieval_mode=retrieval_mode or "hybrid",
             ):
                 if event["event"] == "metadata":

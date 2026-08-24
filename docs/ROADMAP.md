@@ -4,12 +4,12 @@
 
 - FastAPI 后端、Streamlit 前端和整洁架构分层。
 - TXT、Markdown、PDF、DOCX 文档摄取。
-- BGE-M3 Embedding、ChromaDB 持久化和元数据过滤。
+- BGE-M3 dense Embedding、ChromaDB 持久化和元数据过滤。
 - 稠密向量 + BM25 混合召回、RRF 融合、重排和低分拒答。
 - DeepSeek 与 Ollama 大模型 Provider。
 - Text2SQL、SQL 审核和分层数仓设计。
 - LangGraph 意图路由、多步骤工作流和 LangChain 结构化工具。
-- 会话记忆、摘要压缩、最大步骤限制和 SSE 输出。
+- Redis AOF 短期记忆、最近 Agent state、规则记忆，及 ChromaDB+BGE-M3 显式长期记忆。
 - Agent 结果校验节点（`validate_result`）：SQL 结构/引擎校验、审核结论一致性核对、数仓分层覆盖率、RAG 引用校验。
 - 多 LLM 智能路由：专业数据工程任务 → 本地微调模型，通用需求 → 云端，失败自动降级。
 - OpenAI 兼容 Provider：统一 OpenAI 云端与 Ollama 本地 OpenAI 兼容接口。
@@ -29,6 +29,7 @@
 
 - 使用 Cross-Encoder 或大模型进行精排。
 - 引入 Qdrant 稀疏索引，支持 BGE-M3 原生稠密 + 稀疏检索。
+- 评估 BGE-M3 sparse/ColBERT 多向量召回与专用向量引擎。
 - 建立带标准答案、相关文档和失败样本的版本化评测集。
 - 增加答案忠实度、SQL 可执行率、P95 延迟和 Token 成本看板。
 
@@ -42,7 +43,7 @@
 ### 平台能力
 
 - 用户认证、工作区和租户隔离。
-- 将短期记忆迁移到 Redis，长期偏好写入数据库。
+- 用户认证、工作区与租户隔离后，将 memory `user_id` 绑定到可信身份。
 - 大文档异步摄取、任务队列和进度查询。
 - OpenTelemetry 调用链、集中日志、限流和审计。
 

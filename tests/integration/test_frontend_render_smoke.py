@@ -121,7 +121,7 @@ class RenderClient:
             "event": "metadata",
             "data": {
                 "intent": "TEXT2SQL_SQL_REVIEW",
-                "routing_path": ["classify_intent", "text2sql", "sql_review", "format_response"],
+                "routing_path": ["classify_intent", "planner", "text2sql", "sql_review", "format_response"],
             },
         }
         yield {"event": "token", "data": {"text": "Generated SQL"}}

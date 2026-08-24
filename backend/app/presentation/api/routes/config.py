@@ -28,5 +28,9 @@ def runtime_config(settings: Settings = Depends(get_app_settings)) -> RuntimeCon
             "streaming": settings.llm.streaming_enabled,
             "document_upload": True,
             "gpu_optional": True,
+            "bge_m3": settings.embeddings.default_model == "BAAI/bge-m3",
+            "multi_instance_memory": settings.memory.backend == "redis",
+            "long_term_memory": True,
+            "rule_memory": True,
         },
     )

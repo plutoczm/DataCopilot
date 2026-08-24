@@ -30,6 +30,9 @@ def test_settings_defaults_are_project_local_and_typed(
     assert settings.paths.temp_dir == PROJECT_ROOT / "data" / "temp"
     assert settings.paths.models_dir == PROJECT_ROOT / "models"
     assert settings.llm.default_provider is ProviderName.DEEPSEEK
+    assert settings.embeddings.default_model == "BAAI/bge-m3"
+    assert settings.embeddings.lazy_load is True
+    assert settings.memory.backend == "in_memory"
     assert str(settings.deepseek.base_url).rstrip("/") == "https://api.deepseek.com/v1"
     assert settings.deepseek.chat_model == "deepseek-chat"
     assert settings.openai.enabled is False
@@ -188,6 +191,26 @@ def test_llm_routing_settings_default_to_disabled() -> None:
     assert settings.llm.routing_enabled is False
     assert settings.llm.cloud_provider is None
     assert settings.llm.routing_fallback_to_cloud is True
+
+
+def test_rag_agent_and_vector_store_settings_are_validated() -> None:
+    settings = Settings(
+        _env_file=None,
+        vector_store={"mode": "http", "host": "chromadb", "port": 8000},
+        rag={"chunk_size": 800, "chunk_overlap": 120},
+        agent={"max_steps": 10},
+        memory={"backend": "redis", "redis_url": "redis://redis:6379/0"},
+    )
+
+    assert settings.vector_store.mode.value == "http"
+    assert settings.vector_store.host == "chromadb"
+    assert settings.rag.chunk_size == 800
+    assert settings.rag.chunk_overlap == 120
+    assert settings.agent.max_steps == 10
+    assert settings.memory.backend == "redis"
+
+    with pytest.raises(ValidationError, match="chunk_overlap must be smaller"):
+        Settings(_env_file=None, rag={"chunk_size": 500, "chunk_overlap": 500})
 
 
 def test_local_model_and_routing_settings_from_environment(

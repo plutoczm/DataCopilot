@@ -27,6 +27,12 @@ class IntentClassification(BaseModel):
 
 class AgentRequest(BaseModel):
     message: str = Field(min_length=1)
+    user_id: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=128,
+        pattern=r"^[A-Za-z0-9_.:-]+$",
+    )
     session_id: str | None = Field(default=None, min_length=1, max_length=128)
     history: list[dict[str, str]] = Field(default_factory=list)
     collection_name: str = "knowledge_base"

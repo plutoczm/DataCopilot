@@ -1,26 +1,16 @@
-from pathlib import Path
 from enum import StrEnum
+from pathlib import Path
 
 from pydantic import BaseModel, Field
 
 from backend.app.domain.entities.chunk import DocumentChunk
+from backend.app.domain.entities.document import LoadedDocument
 from backend.app.domain.ports.llm_provider import LLMUsage
 
 
 class RetrievalMode(StrEnum):
     VECTOR = "vector"
     HYBRID = "hybrid"
-
-
-class LoadedDocument(BaseModel):
-    document_id: str
-    filename: str
-    file_type: str
-    domain: str
-    source_path: Path
-    stored_path: Path | None = None
-    content: str
-    tags: list[str] = Field(default_factory=list)
 
 
 class TextChunk(BaseModel):

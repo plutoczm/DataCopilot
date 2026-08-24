@@ -18,12 +18,16 @@ x-backend-env: &backend-env
   DATACOPILOT_PATHS__EMBEDDINGS_DIR: data/embeddings
   DATACOPILOT_PATHS__TEMP_DIR: data/temp
   DATACOPILOT_PATHS__MODELS_DIR: models
+  DATACOPILOT_VECTOR_STORE__MODE: http
+  DATACOPILOT_VECTOR_STORE__HOST: chromadb
+  DATACOPILOT_VECTOR_STORE__PORT: "8000"
+  DATACOPILOT_VECTOR_STORE__SSL: "false"
+  DATACOPILOT_MEMORY__BACKEND: redis
+  DATACOPILOT_MEMORY__REDIS_URL: redis://redis:6379/0
+  DATACOPILOT_EMBEDDINGS__DEFAULT_MODEL: BAAI/bge-m3
+  DATACOPILOT_EMBEDDINGS__DEVICE: ${EMBEDDING_DEVICE:-cpu}
+  DATACOPILOT_EMBEDDINGS__USE_FP16: ${EMBEDDING_USE_FP16:-false}
   DATACOPILOT_LOGGING__FILE_PATH: data/logs/datacopilot.log
-  DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
-  DEEPSEEK_BASE_URL: ${DEEPSEEK_BASE_URL:-https://api.deepseek.com/v1}
-  DEEPSEEK_MODEL: ${DEEPSEEK_MODEL:-deepseek-chat}
-  DEEPSEEK_TIMEOUT: ${DEEPSEEK_TIMEOUT:-60}
-  DEEPSEEK_MAX_RETRIES: ${DEEPSEEK_MAX_RETRIES:-2}
   DATACOPILOT_LLM__DEFAULT_PROVIDER: ${LLM_PROVIDER:-deepseek}
   DATACOPILOT_OLLAMA__ENABLED: ${OLLAMA_ENABLED:-false}
   DATACOPILOT_OLLAMA__BASE_URL: ${OLLAMA_BASE_URL:-http://ollama:11434}
@@ -36,6 +40,32 @@ x-backend-env: &backend-env
   DATACOPILOT_LOCAL__CHAT_MODEL: ${LOCAL_MODEL_NAME:-datacopilot-qwen3-8b}
 
 services:
+  redis:
+    image: redis:7.4-alpine
+    container_name: datacopilot-redis
+    restart: unless-stopped
+    command:
+      - redis-server
+      - --appendonly
+      - "yes"
+      - --appendfsync
+      - everysec
+    volumes:
+      - type: bind
+        source: ./data/redis
+        target: /data
+    healthcheck:
+      test: [CMD, redis-cli, ping]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    cpus: "1.0"
+    mem_limit: 1g
+    networks:
+      - datacopilot
+    logging: *common-logging
+
   chromadb:
     image: chromadb/chroma:0.5.23
     container_name: datacopilot-chromadb
@@ -82,10 +112,15 @@ services:
     container_name: datacopilot-backend
     restart: unless-stopped
     env_file:
-      - docker/.env.production
+      - path: docker/.env.production
+        required: true
+      - path: .env
+        required: false
     environment: *backend-env
     depends_on:
       chromadb:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     ports:
       - "${BACKEND_PORT:-8000}:8000"
@@ -93,10 +128,13 @@ services:
       - type: bind
         source: ./data
         target: /app/data
+      - type: bind
+        source: ./models
+        target: /app/models
     healthcheck:
       test:
         - CMD-SHELL
-        - curl -fsS http://127.0.0.1:8000/health >/dev/null || exit 1
+        - curl -fsS http://127.0.0.1:8000/health/live >/dev/null || exit 1
       interval: 30s
       timeout: 10s
       retries: 5

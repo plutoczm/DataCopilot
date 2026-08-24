@@ -62,6 +62,11 @@ class ProviderName(StrEnum):
     LOCAL = PROVIDER_LOCAL
 
 
+class VectorStoreMode(StrEnum):
+    PERSISTENT = "persistent"
+    HTTP = "http"
+
+
 class AppSettings(BaseModel):
     name: str = PROJECT_NAME
     api_prefix: str = "/api/v1"
@@ -130,8 +135,49 @@ class LLMSettings(BaseModel):
 
 class EmbeddingSettings(BaseModel):
     default_model: str = DEFAULT_EMBEDDING_MODEL
-    batch_size: int = Field(default=16, ge=1, le=256)
+    batch_size: int = Field(default=8, ge=1, le=128)
+    max_length: int = Field(default=1024, ge=32, le=8192)
+    device: str = Field(default="auto", pattern="^(auto|cpu|cuda(?::[0-9]+)?)$")
+    use_fp16: bool = True
+    lazy_load: bool = True
     cache_enabled: bool = True
+
+
+class VectorStoreSettings(BaseModel):
+    mode: VectorStoreMode = VectorStoreMode.PERSISTENT
+    host: str = Field(default="127.0.0.1", min_length=1)
+    port: int = Field(default=8000, ge=1, le=65535)
+    ssl: bool = False
+
+
+class RAGSettings(BaseModel):
+    chunk_size: int = Field(default=1000, ge=100, le=8000)
+    chunk_overlap: int = Field(default=200, ge=0, le=2000)
+
+    @model_validator(mode="after")
+    def validate_chunk_overlap(self) -> Self:
+        if self.chunk_overlap >= self.chunk_size:
+            raise ValueError("chunk_overlap must be smaller than chunk_size")
+        return self
+
+
+class AgentSettings(BaseModel):
+    max_steps: int = Field(default=8, ge=4, le=50)
+    memory_max_messages: int = Field(default=12, ge=2, le=100)
+    memory_summary_chars: int = Field(default=1200, ge=200, le=10000)
+
+
+class MemorySettings(BaseModel):
+    backend: str = Field(default="in_memory", pattern="^(in_memory|redis)$")
+    redis_url: str = "redis://127.0.0.1:6379/0"
+    key_prefix: str = Field(default="datacopilot:memory", min_length=1)
+    session_ttl_seconds: int = Field(default=86400, ge=60, le=31_536_000)
+    long_term_collection: str = "agent_long_term_memory"
+    long_term_top_k: int = Field(default=5, ge=1, le=20)
+
+
+class HealthSettings(BaseModel):
+    dependency_timeout_seconds: float = Field(default=3.0, ge=0.1, le=30.0)
 
 
 class APIProviderSettings(BaseModel):
@@ -246,6 +292,11 @@ class Settings(BaseSettings):
     logging: LoggingSettings = Field(default_factory=LoggingSettings)
     llm: LLMSettings = Field(default_factory=LLMSettings)
     embeddings: EmbeddingSettings = Field(default_factory=EmbeddingSettings)
+    vector_store: VectorStoreSettings = Field(default_factory=VectorStoreSettings)
+    rag: RAGSettings = Field(default_factory=RAGSettings)
+    agent: AgentSettings = Field(default_factory=AgentSettings)
+    memory: MemorySettings = Field(default_factory=MemorySettings)
+    health: HealthSettings = Field(default_factory=HealthSettings)
     deepseek: DeepSeekSettings = Field(default_factory=DeepSeekSettings)
     openai: OpenAISettings = Field(default_factory=OpenAISettings)
     ollama: OllamaSettings = Field(default_factory=OllamaSettings)

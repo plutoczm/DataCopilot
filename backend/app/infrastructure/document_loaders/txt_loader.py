@@ -2,7 +2,7 @@ from pathlib import Path
 from uuid import uuid4
 
 from backend.app.application.rag.chunking_service import clean_text
-from backend.app.application.rag.models import LoadedDocument
+from backend.app.domain.entities.document import LoadedDocument
 
 
 class TXTLoader:

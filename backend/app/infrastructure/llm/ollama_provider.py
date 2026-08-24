@@ -49,6 +49,7 @@ class OllamaProvider:
         *,
         temperature: float | None = None,
         max_tokens: int | None = None,
+        task_type: str | None = None,
     ) -> LLMResponse:
         payload = self._payload(messages, temperature, max_tokens, stream=False)
         response = await self._request("POST", "/api/chat", json=payload)
@@ -70,6 +71,7 @@ class OllamaProvider:
         *,
         temperature: float | None = None,
         max_tokens: int | None = None,
+        task_type: str | None = None,
     ) -> AsyncIterator[LLMStreamChunk]:
         payload = self._payload(messages, temperature, max_tokens, stream=True)
         try:

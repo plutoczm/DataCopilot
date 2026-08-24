@@ -7,15 +7,15 @@ from backend.app.application.rag.chunking_service import ChunkingService
 from backend.app.application.rag.models import IngestionResult
 from backend.app.domain.entities.chunk import ChunkMetadata, DocumentChunk
 from backend.app.domain.ports.vector_store import VectorStore
-from backend.app.infrastructure.document_loaders.factory import DocumentLoaderFactory
-from backend.app.infrastructure.embeddings.embedding_provider import EmbeddingProvider
+from backend.app.domain.ports.document_loader import DocumentLoader
+from backend.app.domain.ports.embedding_provider import EmbeddingProvider
 
 
 class DocumentIngestionService:
     def __init__(
         self,
         *,
-        loader_factory: DocumentLoaderFactory,
+        loader_factory: DocumentLoader,
         chunking_service: ChunkingService,
         embedding_provider: EmbeddingProvider,
         vector_store: VectorStore,

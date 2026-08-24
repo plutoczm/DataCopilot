@@ -7,6 +7,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 ARG DATACOPILOT_UID=1014
 ARG DATACOPILOT_GID=1015
+ARG PYTORCH_VERSION=2.8.0
 
 WORKDIR /app
 
@@ -19,6 +20,8 @@ RUN apt-get update \
 
 COPY backend/requirements.txt /app/backend/requirements.txt
 RUN pip install --no-cache-dir --upgrade pip \
+    && pip install --no-cache-dir "torch==${PYTORCH_VERSION}" \
+        --index-url https://download.pytorch.org/whl/cpu \
     && pip install --no-cache-dir -r /app/backend/requirements.txt
 
 COPY backend /app/backend
@@ -32,7 +35,7 @@ USER datacopilot
 EXPOSE 8000
 
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
-    CMD curl -fsS http://127.0.0.1:8000/health || exit 1
+    CMD curl -fsS http://127.0.0.1:8000/health/live || exit 1
 
 ENTRYPOINT ["/usr/bin/tini", "--"]
 CMD ["uvicorn", "backend.app.main:app", "--host=0.0.0.0", "--port=8000"]

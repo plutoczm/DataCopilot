@@ -16,6 +16,7 @@ def test_agent_router_classifies_executes_tool_and_returns_response(app_client) 
     assert payload["intent"] == "TEXT2SQL_SQL_REVIEW"
     assert payload["routing_path"] == [
         "classify_intent",
+        "planner",
         "text2sql",
         "sql_review",
         "format_response",

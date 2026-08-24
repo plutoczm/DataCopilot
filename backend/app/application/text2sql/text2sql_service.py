@@ -86,6 +86,9 @@ class Text2SQLService:
             raise SQLGenerationError("LLM response did not include SQL")
 
         validation = self.sql_validator.validate(sql, schema=schema, engine=engine)
+        if validation.is_valid:
+            sql = self.sql_validator.enforce_row_limit(sql)
+            validation = self.sql_validator.validate(sql, schema=schema, engine=engine)
         suggestions = self._merge_optimization_suggestions(
             payload.get("optimization_suggestions"),
             engine,
@@ -105,6 +108,7 @@ class Text2SQLService:
                 "llm_model": llm_response.model,
                 "rag_used": use_rag,
                 "schema_table_count": len(schema.tables),
+                "row_limit": 500,
             },
         )
 

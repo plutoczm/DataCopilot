@@ -25,6 +25,7 @@ from backend.app.domain.ports.llm_provider import (
     LLMStreamChunk,
     LLMUsage,
 )
+from backend.app.domain.entities.memory import MemoryRule
 from backend.app.main import create_app
 from backend.app.presentation.api.dependencies.providers import get_agent_graph
 
@@ -170,7 +171,12 @@ async def test_agent_graph_routes_rag_query() -> None:
     response = await make_graph().run(AgentRequest(message="什么是Spark AQE"))
 
     assert response.intent is AgentIntent.RAG
-    assert response.routing_path == ["classify_intent", "rag", "format_response"]
+    assert response.routing_path == ["classify_intent", "planner", "rag", "format_response"]
+    assert response.metadata["plan"] == [
+        "query_knowledge_base",
+        "validate_result",
+        "format_response",
+    ]
     assert response.result["answer"].startswith("RAG answer")
     assert response.result["citations"][0]["document_name"] == "spark.md"
     assert response.final_response.startswith("RAG answer")
@@ -186,7 +192,7 @@ async def test_agent_graph_routes_text2sql_query() -> None:
     )
 
     assert response.intent is AgentIntent.TEXT2SQL
-    assert response.routing_path == ["classify_intent", "text2sql", "format_response"]
+    assert response.routing_path == ["classify_intent", "planner", "text2sql", "format_response"]
     assert "COUNT(DISTINCT user_id)" in response.result["sql"]
     assert response.result["validation"]["is_valid"] is True
 
@@ -200,7 +206,7 @@ async def test_agent_graph_routes_sql_review_query() -> None:
     )
 
     assert response.intent is AgentIntent.SQL_REVIEW
-    assert response.routing_path == ["classify_intent", "sql_review", "format_response"]
+    assert response.routing_path == ["classify_intent", "planner", "sql_review", "format_response"]
     assert response.result["risk_level"] == "MEDIUM"
     assert response.result["issues"][0]["code"] == "select_star"
 
@@ -209,7 +215,7 @@ async def test_agent_graph_routes_warehouse_design_query() -> None:
     response = await make_graph().run(AgentRequest(message="设计电商订单数仓"))
 
     assert response.intent is AgentIntent.WAREHOUSE_DESIGN
-    assert response.routing_path == ["classify_intent", "warehouse_design", "format_response"]
+    assert response.routing_path == ["classify_intent", "planner", "warehouse_design", "format_response"]
     assert response.result["ods"]
     assert response.result["dwd"]
     assert response.result["metrics"]
@@ -220,7 +226,7 @@ async def test_agent_graph_handles_general_chat_with_llm() -> None:
     response = await make_graph().run(AgentRequest(message="介绍一下你"))
 
     assert response.intent is AgentIntent.GENERAL_CHAT
-    assert response.routing_path == ["classify_intent", "general_chat", "format_response"]
+    assert response.routing_path == ["classify_intent", "planner", "general_chat", "format_response"]
     assert "DataPilot-AI" in response.final_response
     assert response.result["answer"] == response.final_response
 
@@ -237,6 +243,7 @@ async def test_agent_graph_runs_text2sql_then_sql_review_for_chained_request() -
     assert response.intent is AgentIntent.TEXT2SQL_SQL_REVIEW
     assert response.routing_path == [
         "classify_intent",
+        "planner",
         "text2sql",
         "sql_review",
         "format_response",
@@ -285,6 +292,7 @@ def test_agent_api_returns_structured_response() -> None:
     assert payload["intent"] == "TEXT2SQL_SQL_REVIEW"
     assert payload["routing_path"] == [
         "classify_intent",
+        "planner",
         "text2sql",
         "sql_review",
         "format_response",
@@ -315,6 +323,31 @@ def test_agent_stream_api_returns_sse_events() -> None:
     assert "event: done" in body
 
 
+def test_agent_stream_api_emits_error_event_after_workflow_failure() -> None:
+    class BrokenStreamingGraph:
+        async def stream(self, request):
+            if False:
+                yield None
+            raise AgentExecutionError("Agent workflow failed")
+
+    app = create_app()
+    app.dependency_overrides[get_agent_graph] = lambda: BrokenStreamingGraph()
+    client = TestClient(app, raise_server_exceptions=False)
+
+    with client.stream(
+        "POST",
+        "/api/v1/agent/chat/stream",
+        json={"message": "介绍一下你"},
+    ) as response:
+        body = "".join(response.iter_text())
+
+    assert response.status_code == 200
+    assert "event: error" in body
+    assert '"code": "agent_error"' in body
+    assert "event: done" in body
+    assert '"status": "failed"' in body
+
+
 def test_agent_api_returns_consistent_error_for_agent_failures() -> None:
     class BrokenGraph:
         async def run(self, request):
@@ -335,10 +368,83 @@ def test_agent_api_returns_consistent_error_for_agent_failures() -> None:
 def test_agent_response_schema_allows_unknown_intent() -> None:
     response = AgentResponse(
         intent=AgentIntent.UNKNOWN,
-        routing_path=["classify_intent", "unknown", "format_response"],
+        routing_path=["classify_intent", "planner", "unknown", "format_response"],
         result={"answer": "I am not sure which DataPilot-AI workflow to use."},
         final_response="I am not sure which DataPilot-AI workflow to use.",
     )
 
     assert response.intent is AgentIntent.UNKNOWN
     assert response.result["answer"].startswith("I am not sure")
+
+
+def test_agent_memory_api_manages_long_term_and_rule_memory() -> None:
+    graph = make_graph()
+    app = create_app()
+    app.dependency_overrides[get_agent_graph] = lambda: graph
+    client = TestClient(app, raise_server_exceptions=False)
+
+    created = client.post(
+        "/api/v1/agent/memory/long-term",
+        json={"user_id": "user-1", "content": "I prefer Spark SQL."},
+    )
+    assert created.status_code == 201
+    memory_id = created.json()["id"]
+
+    listed = client.get("/api/v1/agent/memory/long-term/user-1")
+    assert listed.status_code == 200
+    assert listed.json()["memories"][0]["content"] == "I prefer Spark SQL."
+
+    rule = client.put(
+        "/api/v1/agent/memory/rules/prefer-spark",
+        json={
+            "content": "Prefer Spark SQL.",
+            "scope": "user",
+            "user_id": "user-1",
+            "priority": 500,
+        },
+    )
+    assert rule.status_code == 200
+
+    rules = client.get("/api/v1/agent/memory/rules", params={"user_id": "user-1"})
+    assert rules.json()["rules"][0]["id"] == "prefer-spark"
+
+    deleted_memory = client.delete(
+        f"/api/v1/agent/memory/long-term/user-1/{memory_id}"
+    )
+    deleted_rule = client.delete(
+        "/api/v1/agent/memory/rules/prefer-spark",
+        params={"user_id": "user-1"},
+    )
+    assert deleted_memory.json()["deleted"] is True
+    assert deleted_rule.json()["deleted"] is True
+
+
+async def test_agent_loads_long_term_and_rule_memory_into_metadata() -> None:
+    graph = make_graph()
+    await graph.add_long_term_memory("user-1", "Spark SQL is preferred")
+    graph.upsert_memory_rule(
+        MemoryRule(
+            id="safe-rule",
+            content="Never generate write SQL.",
+            scope="user",
+            user_id="user-1",
+            priority=1000,
+        )
+    )
+
+    response = await graph.run(
+        AgentRequest(
+            message="介绍一下你",
+            user_id="user-1",
+            session_id="session-memory",
+        )
+    )
+
+    assert response.metadata["memory"]["rules_loaded"] == 1
+    assert response.metadata["memory"]["long_term_memories_recalled"] == 1
+    checkpoint = graph.load_session_state(
+        "session-memory",
+        user_id="user-1",
+    )
+    assert checkpoint["intent"] == "GENERAL_CHAT"
+    assert checkpoint["routing_path"] == response.routing_path

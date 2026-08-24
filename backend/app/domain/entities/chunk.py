@@ -10,6 +10,7 @@ class ChunkMetadata(BaseModel):
     created_at: str
     source: str
     tags: list[str] = Field(default_factory=list)
+    owner_id: str | None = None
 
 
 class DocumentChunk(BaseModel):

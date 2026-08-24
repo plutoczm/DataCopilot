@@ -171,6 +171,15 @@ def test_health_endpoint_returns_structured_status() -> None:
     assert payload["vector_store"]["status"] == "ok"
 
 
+def test_liveness_endpoint_does_not_probe_dependencies() -> None:
+    client = make_client()
+
+    response = client.get("/health/live")
+
+    assert response.status_code == 200
+    assert response.json() == {"service": "DataPilot-AI", "status": "ok"}
+
+
 def test_health_endpoint_degrades_when_default_collection_is_missing() -> None:
     client = make_client(vector_store=MissingCollectionVectorStore())
 
@@ -214,6 +223,9 @@ def test_openapi_schema_includes_expected_api_routes() -> None:
     assert "/api/v1/warehouse-design" in schema["paths"]
     assert "/api/v1/agent/chat" in schema["paths"]
     assert "/api/v1/agent/chat/stream" in schema["paths"]
+    assert "/api/v1/agent/memory/long-term" in schema["paths"]
+    assert "/api/v1/agent/memory/rules/{rule_id}" in schema["paths"]
+    assert "/api/v1/agent/sessions/{session_id}/state" in schema["paths"]
 
 
 def test_runtime_config_does_not_expose_secrets() -> None:
@@ -307,6 +319,7 @@ def test_validation_errors_use_consistent_response_format() -> None:
     payload = response.json()
     assert payload["error"]["code"] == "validation_error"
     assert payload["error"]["message"]
+    assert payload["request_id"] == response.headers["x-request-id"]
 
 
 def test_unhandled_errors_use_consistent_response_format() -> None:
@@ -321,3 +334,4 @@ def test_unhandled_errors_use_consistent_response_format() -> None:
     payload = response.json()
     assert payload["error"]["code"] == "internal_server_error"
     assert payload["error"]["message"] == "服务器内部错误"
+    assert payload["request_id"] == response.headers["x-request-id"]

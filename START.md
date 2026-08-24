@@ -15,9 +15,27 @@ python manage.py stop
 python manage.py setup     # 只创建/检查环境
 ```
 
+首次使用真实 BGE-M3：
+
+```bash
+python scripts/verify_bge_m3.py
+```
+
 - 工作台：http://127.0.0.1:8502
 - API 文档：http://127.0.0.1:8000/docs
 - 修改 `.env` 后必须重启后端才生效。
+
+## Docker 完整栈
+
+1. 从 `.env.example` 创建根目录 `.env`，填写 `DEEPSEEK_API_KEY`。
+2. 启动 FastAPI、Streamlit、ChromaDB 和 Redis：
+
+```bash
+docker compose --env-file docker/.env.production up -d --build
+docker compose --env-file docker/.env.production ps
+```
+
+3. 访问工作台 `http://127.0.0.1:8501`。Docker 模式默认启用 Redis AOF 多实例记忆；BGE-M3 模型缓存复用项目 `models/` 目录。
 
 ## Vercel 部署与移除
 

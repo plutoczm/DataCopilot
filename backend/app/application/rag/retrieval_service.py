@@ -4,8 +4,8 @@ from collections import Counter
 
 from backend.app.application.rag.models import RetrievedChunk, RetrievalMode
 from backend.app.domain.entities.chunk import DocumentChunk
+from backend.app.domain.ports.embedding_provider import EmbeddingProvider
 from backend.app.domain.ports.vector_store import VectorStore
-from backend.app.infrastructure.embeddings.embedding_provider import EmbeddingProvider
 
 
 class RetrievalService:

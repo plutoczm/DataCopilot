@@ -15,7 +15,9 @@ class AgentState(TypedDict):
     confidence: float
     intent_reason: str
     history: list[dict[str, str]]
+    memory_context: NotRequired[str]
     routing_path: list[str]
+    plan: NotRequired[list[str]]
     retrieved_context: NotRequired[RAGResponse]
     generated_sql: NotRequired[Text2SQLResult]
     review_result: NotRequired[SQLReviewResult]

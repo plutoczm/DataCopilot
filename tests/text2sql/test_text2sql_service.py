@@ -214,6 +214,40 @@ def test_sql_validator_detects_rule_violations() -> None:
     assert dangerous_delete.is_valid is False
     assert dangerous_delete.has_issue("dangerous_delete")
 
+    for keyword in ("DROP", "UPDATE", "INSERT", "ALTER", "TRUNCATE"):
+        unsafe = validator.validate(
+            f"SELECT user_id FROM user_info; {keyword} TABLE user_info",
+            schema=schema,
+            engine=SQLEngine.MYSQL,
+        )
+        assert unsafe.is_valid is False
+        assert unsafe.has_issue(f"dangerous_{keyword.lower()}")
+        assert unsafe.has_issue("multiple_statements_not_allowed")
+
+    commented = validator.validate(
+        "SELECT user_id FROM user_info -- hidden statement",
+        schema=schema,
+        engine=SQLEngine.MYSQL,
+    )
+    assert commented.has_issue("sql_comments_not_allowed")
+
+    unbalanced = validator.validate(
+        "SELECT (user_id FROM user_info",
+        schema=schema,
+        engine=SQLEngine.MYSQL,
+    )
+    assert unbalanced.has_issue("invalid_sql_syntax")
+
+
+def test_sql_validator_enforces_and_caps_result_limit() -> None:
+    validator = SQLValidator()
+
+    assert validator.enforce_row_limit("SELECT 1") == "SELECT 1 LIMIT 500"
+    assert validator.enforce_row_limit("SELECT 1 LIMIT 1000") == "SELECT 1 LIMIT 500"
+    assert validator.enforce_row_limit("SELECT 1 LIMIT 20") == "SELECT 1 LIMIT 20"
+    assert validator.enforce_row_limit("SELECT 1 LIMIT 10, 1000") == "SELECT 1 LIMIT 10, 500"
+    assert validator.enforce_row_limit("SELECT ';' AS marker;") == "SELECT ';' AS marker LIMIT 500"
+
 
 async def test_text2sql_service_generates_valid_sql_with_mock_llm() -> None:
     llm = FakeLLMProvider()
@@ -228,12 +262,33 @@ async def test_text2sql_service_generates_valid_sql_with_mock_llm() -> None:
     assert result.engine is SQLEngine.MYSQL
     assert result.sql.startswith("SELECT")
     assert "order_info" in result.sql
+    assert result.sql.endswith("LIMIT 10")
     assert result.validation.is_valid is True
     assert result.confidence == 0.95
     assert any("index" in suggestion.lower() for suggestion in result.optimization_suggestions)
     prompt = "\n".join(message.content for message in llm.messages)
     assert "Never invent tables" in prompt
     assert "统计每个省份订单金额Top10" in prompt
+
+
+async def test_text2sql_service_adds_default_limit_when_llm_omits_it() -> None:
+    content = json.dumps(
+        {
+            "sql": "SELECT COUNT(*) AS active_users FROM user_info",
+            "confidence": 0.9,
+        }
+    )
+    service = Text2SQLService(llm_provider=FakeLLMProvider(content))
+
+    result = await service.generate(
+        question="统计活跃用户",
+        engine=SQLEngine.HIVE,
+        schema_context=SCHEMA_CONTEXT,
+    )
+
+    assert result.sql.endswith("LIMIT 500")
+    assert result.metadata["row_limit"] == 500
+    assert result.validation.is_valid is True
 
 
 async def test_text2sql_service_adds_engine_specific_optimization_hints() -> None:

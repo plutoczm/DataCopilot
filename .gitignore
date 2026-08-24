@@ -12,6 +12,7 @@ data/logs/*
 data/cache/*
 data/embeddings/*
 data/temp/*
+data/redis/*
 models/*
 
 !data/chromadb/.gitkeep
@@ -20,6 +21,7 @@ models/*
 !data/cache/.gitkeep
 !data/embeddings/.gitkeep
 !data/temp/.gitkeep
+!data/redis/.gitkeep
 !models/.gitkeep
 
 .env

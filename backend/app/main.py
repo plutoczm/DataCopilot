@@ -10,7 +10,9 @@ from backend.app.application.agent.exceptions import AgentError
 from backend.app.core.constants import APP_VERSION
 from backend.app.core.config import get_settings
 from backend.app.core.logging_config import setup_fastapi_logging
+from backend.app.core.logger import get_request_id
 from backend.app.infrastructure.llm.exceptions import LLMProviderError
+from backend.app.infrastructure.embeddings.exceptions import EmbeddingProviderError
 from backend.app.infrastructure.vectorstore.exceptions import VectorStoreError
 from backend.app.presentation.api.router import api_router
 from backend.app.presentation.api.schemas.common import ErrorDetail, ErrorResponse
@@ -56,6 +58,19 @@ def create_app() -> FastAPI:
     )
     logger = setup_fastapi_logging(app, settings)
 
+    def _request_id(request: Request) -> str | None:
+        return getattr(request.state, "request_id", None) or get_request_id()
+
+    def _error_headers(request: Request) -> dict[str, str]:
+        request_id = _request_id(request)
+        trace_id = getattr(request.state, "trace_id", None)
+        headers: dict[str, str] = {}
+        if request_id:
+            headers[settings.logging.request_id_header] = request_id
+        if trace_id:
+            headers[settings.logging.trace_id_header] = trace_id
+        return headers
+
     @app.middleware("http")
     async def request_timing(request: Request, call_next):
         started_at = time.perf_counter()
@@ -76,8 +91,10 @@ def create_app() -> FastAPI:
                     code="validation_error",
                     message="请求参数校验失败",
                     details=[dict(error) for error in exc.errors()],
-                )
+                ),
+                request_id=_request_id(request),
             ).model_dump(mode="json"),
+            headers=_error_headers(request),
         )
 
     @app.exception_handler(LLMProviderError)
@@ -86,8 +103,10 @@ def create_app() -> FastAPI:
         return JSONResponse(
             status_code=502,
             content=ErrorResponse(
-                error=ErrorDetail(code="llm_provider_error", message=str(exc))
+                error=ErrorDetail(code="llm_provider_error", message=str(exc)),
+                request_id=_request_id(request),
             ).model_dump(mode="json"),
+            headers=_error_headers(request),
         )
 
     @app.exception_handler(VectorStoreError)
@@ -96,8 +115,28 @@ def create_app() -> FastAPI:
         return JSONResponse(
             status_code=500,
             content=ErrorResponse(
-                error=ErrorDetail(code="vector_store_error", message=str(exc))
+                error=ErrorDetail(code="vector_store_error", message=str(exc)),
+                request_id=_request_id(request),
             ).model_dump(mode="json"),
+            headers=_error_headers(request),
+        )
+
+    @app.exception_handler(EmbeddingProviderError)
+    async def embedding_exception_handler(
+        request: Request,
+        exc: EmbeddingProviderError,
+    ) -> JSONResponse:
+        logger.error("Embedding provider error", extra={"error": str(exc)})
+        return JSONResponse(
+            status_code=503,
+            content=ErrorResponse(
+                error=ErrorDetail(
+                    code="embedding_provider_error",
+                    message=str(exc),
+                ),
+                request_id=_request_id(request),
+            ).model_dump(mode="json"),
+            headers=_error_headers(request),
         )
 
     @app.exception_handler(AgentError)
@@ -106,8 +145,10 @@ def create_app() -> FastAPI:
         return JSONResponse(
             status_code=500,
             content=ErrorResponse(
-                error=ErrorDetail(code="agent_error", message=str(exc))
+                error=ErrorDetail(code="agent_error", message=str(exc)),
+                request_id=_request_id(request),
             ).model_dump(mode="json"),
+            headers=_error_headers(request),
         )
 
     @app.exception_handler(Exception)
@@ -119,8 +160,10 @@ def create_app() -> FastAPI:
                 error=ErrorDetail(
                     code="internal_server_error",
                     message="服务器内部错误",
-                )
+                ),
+                request_id=_request_id(request),
             ).model_dump(mode="json"),
+            headers=_error_headers(request),
         )
 
     app.include_router(api_router)

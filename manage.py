@@ -178,7 +178,7 @@ def start(backend_port: int, frontend_port: int, lan: bool, open_browser: bool) 
     )
     frontend: subprocess.Popen | None = None
     try:
-        wait_until_ready(f"{backend_url}/health", backend)
+        wait_until_ready(f"{backend_url}/health/live", backend)
         frontend = subprocess.Popen(
             [
                 str(python), "-m", "streamlit", "run", "frontend/app.py",

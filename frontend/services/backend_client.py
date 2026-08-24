@@ -99,6 +99,7 @@ class BackendClient:
         top_k: int = 5,
         use_rag: bool = False,
         session_id: str | None = None,
+        user_id: str | None = None,
         retrieval_mode: str = "hybrid",
     ) -> dict[str, Any]:
         payload = {
@@ -111,6 +112,8 @@ class BackendClient:
         }
         if session_id:
             payload["session_id"] = session_id
+        if user_id:
+            payload["user_id"] = user_id
         if retrieval_mode != "hybrid":
             payload["retrieval_mode"] = retrieval_mode
         return self._json(
@@ -130,6 +133,7 @@ class BackendClient:
         top_k: int = 5,
         use_rag: bool = False,
         session_id: str | None = None,
+        user_id: str | None = None,
         retrieval_mode: str = "hybrid",
     ) -> Iterator[dict[str, Any]]:
         payload = {
@@ -142,6 +146,8 @@ class BackendClient:
         }
         if session_id:
             payload["session_id"] = session_id
+        if user_id:
+            payload["user_id"] = user_id
         if retrieval_mode != "hybrid":
             payload["retrieval_mode"] = retrieval_mode
         with self.client.stream(
@@ -205,6 +211,54 @@ class BackendClient:
                     "use_rag": use_rag,
                     "recommendation_language": recommendation_language,
                 },
+            )
+        )
+
+    def add_long_term_memory(self, user_id: str, content: str) -> dict[str, Any]:
+        return self._json(
+            self.client.post(
+                "/api/v1/agent/memory/long-term",
+                json={"user_id": user_id, "content": content},
+            )
+        )
+
+    def list_long_term_memories(self, user_id: str) -> dict[str, Any]:
+        return self._json(
+            self.client.get(f"/api/v1/agent/memory/long-term/{user_id}")
+        )
+
+    def upsert_memory_rule(
+        self,
+        rule_id: str,
+        *,
+        content: str,
+        user_id: str | None = None,
+        scope: str = "user",
+        priority: int = 100,
+    ) -> dict[str, Any]:
+        return self._json(
+            self.client.put(
+                f"/api/v1/agent/memory/rules/{rule_id}",
+                json={
+                    "content": content,
+                    "user_id": user_id,
+                    "scope": scope,
+                    "priority": priority,
+                },
+            )
+        )
+
+    def get_agent_session_state(
+        self,
+        session_id: str,
+        *,
+        user_id: str | None = None,
+    ) -> dict[str, Any]:
+        params = {"user_id": user_id} if user_id else None
+        return self._json(
+            self.client.get(
+                f"/api/v1/agent/sessions/{session_id}/state",
+                params=params,
             )
         )
 

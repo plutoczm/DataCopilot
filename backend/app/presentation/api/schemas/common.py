@@ -9,6 +9,7 @@ class ErrorDetail(BaseModel):
 
 class ErrorResponse(BaseModel):
     error: ErrorDetail
+    request_id: str | None = None
 
 
 class DeleteResponse(BaseModel):

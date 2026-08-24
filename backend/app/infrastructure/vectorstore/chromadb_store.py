@@ -7,7 +7,7 @@ import chromadb
 from chromadb.config import Settings as ChromaSettings
 from chromadb.api.models.Collection import Collection
 
-from backend.app.core.settings import Settings
+from backend.app.core.settings import Settings, VectorStoreMode
 from backend.app.domain.entities.chunk import ChunkMetadata, DocumentChunk
 from backend.app.domain.ports.vector_store import CollectionStats, VectorSearchResult
 from backend.app.infrastructure.vectorstore.exceptions import (
@@ -28,13 +28,24 @@ class ChromaDBVectorStore:
     def __init__(self, settings: Settings, client: Any | None = None) -> None:
         self.settings = settings
         self.persist_directory = Path(settings.paths.chromadb_dir)
-        self.persist_directory.mkdir(parents=True, exist_ok=True)
-        self.client = client or chromadb.PersistentClient(
-            path=str(self.persist_directory),
-            settings=ChromaSettings(anonymized_telemetry=False),
-        )
+        self.client = client or self._build_client()
         self._collections: dict[str, Collection] = {}
         self._dimensions: dict[str, int] = {}
+
+    def _build_client(self) -> Any:
+        chroma_settings = ChromaSettings(anonymized_telemetry=False)
+        if self.settings.vector_store.mode is VectorStoreMode.HTTP:
+            return chromadb.HttpClient(
+                host=self.settings.vector_store.host,
+                port=self.settings.vector_store.port,
+                ssl=self.settings.vector_store.ssl,
+                settings=chroma_settings,
+            )
+        self.persist_directory.mkdir(parents=True, exist_ok=True)
+        return chromadb.PersistentClient(
+            path=str(self.persist_directory),
+            settings=chroma_settings,
+        )
 
     def create_collection(
         self,
@@ -338,7 +349,7 @@ class ChromaDBVectorStore:
         return len(embeddings[0])
 
     def _metadata_to_chroma(self, metadata: ChunkMetadata) -> Metadata:
-        return {
+        result: Metadata = {
             "document_id": metadata.document_id,
             "filename": metadata.filename,
             "file_type": metadata.file_type,
@@ -348,6 +359,9 @@ class ChromaDBVectorStore:
             "source": metadata.source,
             "tags": json.dumps(metadata.tags, ensure_ascii=True),
         }
+        if metadata.owner_id is not None:
+            result["owner_id"] = metadata.owner_id
+        return result
 
     def _metadata_filter_to_chroma(self, metadata_filter: Metadata | None) -> Any:
         if not metadata_filter:
@@ -373,6 +387,11 @@ class ChromaDBVectorStore:
             created_at=str(metadata["created_at"]),
             source=str(metadata["source"]),
             tags=tags,
+            owner_id=(
+                str(metadata["owner_id"])
+                if metadata.get("owner_id") is not None
+                else None
+            ),
         )
 
     def _chunks_from_get_result(self, result: dict[str, Any]) -> list[DocumentChunk]:

@@ -1,6 +1,7 @@
 from dataclasses import dataclass, field
 
 from backend.app.application.agent.graph import AgentGraph
+from backend.app.application.agent.memory import ConversationMemory
 from backend.app.application.rag.chunking_service import ChunkingService
 from backend.app.application.rag.citation_service import CitationService
 from backend.app.application.rag.document_ingestion_service import DocumentIngestionService
@@ -23,6 +24,7 @@ from backend.app.infrastructure.llm import (
     RoutingLLMProvider,
     TaskBoundLLMProvider,
 )
+from backend.app.infrastructure.memory import RedisChromaAgentMemory
 from backend.app.infrastructure.vectorstore import ChromaDBVectorStore
 
 
@@ -48,6 +50,7 @@ _vector_store: VectorStore | None = None
 _embedding_provider: EmbeddingProvider | None = None
 _llm_provider: LLMProvider | None = None
 _agent_graph: AgentGraph | None = None
+_agent_memory = None
 
 
 def get_app_settings() -> Settings:
@@ -58,7 +61,7 @@ def get_document_registry() -> DocumentRegistry:
     return _registry
 
 
-def get_vector_store(settings: Settings = None) -> VectorStore:
+def get_vector_store(settings: Settings | None = None) -> VectorStore:
     global _vector_store
     if _vector_store is None:
         _vector_store = ChromaDBVectorStore(settings=settings or get_app_settings())
@@ -70,14 +73,14 @@ def get_vector_store(settings: Settings = None) -> VectorStore:
     return _vector_store
 
 
-def get_embedding_provider(settings: Settings = None) -> EmbeddingProvider:
+def get_embedding_provider(settings: Settings | None = None) -> EmbeddingProvider:
     global _embedding_provider
     if _embedding_provider is None:
         _embedding_provider = BGEM3EmbeddingProvider(settings or get_app_settings())
     return _embedding_provider
 
 
-def get_llm_provider(settings: Settings = None) -> LLMProvider:
+def get_llm_provider(settings: Settings | None = None) -> LLMProvider:
     global _llm_provider
     if _llm_provider is None:
         resolved = settings or get_app_settings()
@@ -126,7 +129,10 @@ def get_document_ingestion_service() -> DocumentIngestionService:
     settings = get_app_settings()
     return DocumentIngestionService(
         loader_factory=DocumentLoaderFactory(),
-        chunking_service=ChunkingService(),
+        chunking_service=ChunkingService(
+            chunk_size=settings.rag.chunk_size,
+            chunk_overlap=settings.rag.chunk_overlap,
+        ),
         embedding_provider=get_embedding_provider(settings),
         vector_store=get_vector_store(settings),
         uploads_dir=settings.paths.uploads_dir,
@@ -172,6 +178,24 @@ def get_warehouse_design_service() -> WarehouseDesignService:
     )
 
 
+def get_agent_memory():
+    global _agent_memory
+    if _agent_memory is None:
+        settings = get_app_settings()
+        if settings.memory.backend == "redis":
+            _agent_memory = RedisChromaAgentMemory(
+                settings=settings,
+                vector_store=get_vector_store(settings),
+                embedding_provider=get_embedding_provider(settings),
+            )
+        else:
+            _agent_memory = ConversationMemory(
+                max_messages=settings.agent.memory_max_messages,
+                summary_chars=settings.agent.memory_summary_chars,
+            )
+    return _agent_memory
+
+
 def get_agent_graph() -> AgentGraph:
     global _agent_graph
     if _agent_graph is None:
@@ -182,5 +206,7 @@ def get_agent_graph() -> AgentGraph:
             sql_review_service=get_sql_review_service(),
             warehouse_design_service=get_warehouse_design_service(),
             llm_provider=_task_bound(get_llm_provider(settings), TaskType.GENERAL_CHAT),
+            memory=get_agent_memory(),
+            max_steps=settings.agent.max_steps,
         )
     return _agent_graph

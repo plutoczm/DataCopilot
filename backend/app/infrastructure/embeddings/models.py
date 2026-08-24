@@ -1,8 +1,3 @@
-from pydantic import BaseModel, Field
+from backend.app.domain.entities.embedding import EmbeddingResult
 
-
-class EmbeddingResult(BaseModel):
-    text: str
-    embedding: list[float]
-    model: str
-    token_count: int = Field(ge=0)
+__all__ = ["EmbeddingResult"]

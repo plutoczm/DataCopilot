@@ -7,7 +7,7 @@
 - **Prompt**：发给模型的指令和上下文。项目为 RAG、Text2SQL、SQL 审核、数仓设计分别维护角色、约束、输出格式和领域上下文，避免一个超长通用 Prompt 承担所有任务。
 - **Token**：模型输入输出和上下文窗口的计量单位。接口统一返回 `prompt_tokens`、`completion_tokens` 和 `total_tokens`，便于监控成本。
 - **Temperature**：RAG 和结构化任务使用低温度以提高稳定性；开放式对话可适度提高温度。
-- **Embedding**：文本经过 BGE-M3 Embedding Provider 转为稠密向量后写入 ChromaDB。Embedding 在文档摄取阶段离线完成，查询时只向量化问题。
+- **Embedding**：FlagEmbedding 真实加载 `BAAI/bge-m3`，输出 1024 维 dense 向量；CPU 自动禁用 FP16，GPU 可配置 FP16。
 - **微调与 RAG**：缺少动态事实和私有知识时优先 RAG；需要稳定改变表达风格、格式遵循或领域能力时考虑 SFT/LoRA。当前项目实现 RAG，未内置微调训练流水线。
 
 ## 2. Prompt 工程
@@ -18,19 +18,19 @@ CoT 是通过提示词要求模型展示或执行分步推理的手段，会增�
 
 ## 3. 上下文与记忆
 
-项目使用三层上下文：
+项目使用三层 Agent memory：
 
 1. 工作记忆：单次 LangGraph 的 `AgentState`，任务结束即释放。
-2. 短期记忆：同一 `session_id` 最近 12 条消息，用于多轮对话。
-3. 压缩记忆：超出窗口的旧消息被确定性摘要，作为 system context 回注。
+2. 短期与状态记忆：Docker 模式由 Redis AOF 按 `user_id + session_id` 保存最近消息、摘要和最近 Agent checkpoint，供多实例共享。
+3. 长期与规则记忆：显式长期偏好保存到 ChromaDB+BGE-M3；global/user 规则保存到 Redis，并按优先级合并为 system context。
 
-客户端仍可显式传 `history`。服务端记忆可通过 `DELETE /api/v1/agent/sessions/{session_id}` 清除。用户偏好等长期记忆应落到带租户隔离的持久化数据库，当前演示版不把进程内状态伪装成长期存储。
+客户端仍可显式传 `history`。服务端会话可通过 `DELETE /api/v1/agent/sessions/{session_id}?user_id=...` 清除；长期记忆和规则也有显式写入/删除 API。`user_id` 当前是应用层标识，生产环境必须由认证系统提供并完成租户隔离。
 
 ## 4. RAG 流水线
 
 ```text
 PDF/DOCX/TXT/MD -> 结构化加载 -> 语义边界切分 + overlap
-                 -> BGE-M3 稠密向量 -> ChromaDB
+                 -> BGE-M3 dense 向量 -> ChromaDB
 
 问题 -> Dense ANN -------------------+
      -> BM25 关键词召回 --------------+-> RRF 融合 -> 词项重排 -> Top K
@@ -51,7 +51,7 @@ PDF/DOCX/TXT/MD -> 结构化加载 -> 语义边界切分 + overlap
 
 - LangGraph：任务规划和有向状态图，支持 Text2SQL 后自动进入 SQL Review 的多步工作流。
 - LangChain Core：`StructuredTool`、工具描述与参数 Schema。
-- Memory：进程内短期消息队列和摘要压缩。
+- Memory：Redis AOF 的短期消息/摘要/状态与规则记忆，ChromaDB+BGE-M3 的显式长期语义记忆。
 - Observability：返回意图置信度、路由路径、工具调用次数、耗时、错误和 Token 使用量。
 - Safety：图递归步数上限、SQL 静态校验、RAG 引用和低置信度兜底。
 
@@ -80,10 +80,10 @@ docker compose exec ollama ollama pull qwen3
 LLM_PROVIDER=ollama OLLAMA_ENABLED=true OLLAMA_MODEL=qwen3 docker compose --profile ollama up -d
 ```
 
-后端、前端、ChromaDB 和 Ollama 都有健康检查、资源限制、持久化目录和统一网络。生产环境还需在反向代理层配置 TLS、鉴权、限流和集中日志。
+后端、前端、ChromaDB、Redis 和 Ollama 都有健康检查、资源限制、持久化目录和统一网络。BGE-M3 权重挂载在 `models/`，Docker 使用 CPU PyTorch wheel 避免额外 CUDA 依赖。生产环境还需在反向代理层配置 TLS、鉴权、限流和集中日志。
 
 ## 10. 能力边界
 
-已实现：Prompt 模板、Token 统计、Embedding、文档切分、ChromaDB、混合检索、RRF/轻量重排、引用与拒答、结构化工具、LangGraph 多步规划、短期记忆、SSE、评测指标、Docker、Ollama。
+已实现：Prompt 模板、Token 统计、真实 BGE-M3 dense embedding、文档切分、ChromaDB、Redis 三层记忆、混合检索、RRF/轻量重排、引用与拒答、结构化工具、LangGraph 多步规划、SSE、评测指标、Docker、Ollama。
 
-扩展项：真正持久化的长期记忆、LLM 意图分类、Cross-Encoder/LLM Rerank、Qdrant 原生稀疏索引、Multi-Agent 协作、LoRA 微调训练、线上 tracing 与人工审批工作流。
+扩展项：可信认证/租户隔离、LLM 意图分类、Cross-Encoder/LLM Rerank、BGE-M3 sparse/ColBERT、Qdrant 原生稀疏索引、Multi-Agent 协作、LoRA 微调训练、线上 tracing 与人工审批工作流。

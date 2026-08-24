@@ -10,6 +10,8 @@ from typing import Any
 from uuid import uuid4
 
 from backend.app.core.logger import (
+    REQUEST_ID_CONTEXT_KEY,
+    TRACE_ID_CONTEXT_KEY,
     RequestContextFilter,
     log_exception,
     reset_request_context,
@@ -159,6 +161,9 @@ class RequestTraceMiddleware:
         headers = _decode_headers(scope.get("headers", []))
         request_id = headers.get(self.request_id_header) or str(uuid4())
         trace_id = headers.get(self.trace_id_header) or request_id
+        state = scope.setdefault("state", {})
+        state[REQUEST_ID_CONTEXT_KEY] = request_id
+        state[TRACE_ID_CONTEXT_KEY] = trace_id
         tokens = set_request_context(request_id=request_id, trace_id=trace_id)
         started_at = time.perf_counter()
         status_code = 500

@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from backend.app.application.rag.models import LoadedDocument
+from backend.app.domain.entities.document import LoadedDocument
 from backend.app.infrastructure.document_loaders.docx_loader import DOCXLoader
 from backend.app.infrastructure.document_loaders.markdown_loader import MarkdownLoader
 from backend.app.infrastructure.document_loaders.pdf_loader import PDFLoader

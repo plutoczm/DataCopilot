@@ -1,4 +1,5 @@
 from pathlib import Path
+from unittest.mock import patch
 from uuid import uuid4
 
 import pytest
@@ -41,6 +42,28 @@ def test_default_persist_directory_is_project_local() -> None:
     settings = Settings(_env_file=None)
 
     assert settings.paths.chromadb_dir == settings.paths.data_dir / "chromadb"
+
+
+def test_http_mode_uses_configured_chromadb_service(tmp_path: Path) -> None:
+    base = make_settings(tmp_path)
+    settings = Settings(
+        _env_file=None,
+        environment="test",
+        paths=base.paths.model_dump(),
+        vector_store={"mode": "http", "host": "chromadb", "port": 8000},
+    )
+
+    with patch(
+        "backend.app.infrastructure.vectorstore.chromadb_store.chromadb.HttpClient"
+    ) as client_factory:
+        store = ChromaDBVectorStore(settings=settings)
+
+    assert store.client is client_factory.return_value
+    client_factory.assert_called_once()
+    call = client_factory.call_args.kwargs
+    assert call["host"] == "chromadb"
+    assert call["port"] == 8000
+    assert call["ssl"] is False
 
 
 def make_chunk(

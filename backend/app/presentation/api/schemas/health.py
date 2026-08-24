@@ -9,6 +9,11 @@ class RootResponse(BaseModel):
     openapi: str
 
 
+class LivenessResponse(BaseModel):
+    service: str
+    status: str
+
+
 class ProviderHealthResponse(BaseModel):
     provider: str
     ok: bool

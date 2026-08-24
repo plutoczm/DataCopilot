@@ -17,9 +17,10 @@ def test_compose_defines_required_services_profiles_and_network() -> None:
     compose = load_compose()
     services = compose["services"]
 
-    assert {"backend", "frontend", "chromadb", "ollama"}.issubset(services)
+    assert {"backend", "frontend", "chromadb", "redis", "ollama"}.issubset(services)
     assert services["frontend"]["depends_on"]["backend"]["condition"] == "service_healthy"
     assert services["backend"]["depends_on"]["chromadb"]["condition"] == "service_healthy"
+    assert services["backend"]["depends_on"]["redis"]["condition"] == "service_healthy"
     assert services["ollama"]["profiles"] == ["ollama"]
     assert "datacopilot" in compose["networks"]
 
@@ -32,6 +33,12 @@ def test_compose_backend_exposes_routing_and_local_model_env_passthrough() -> No
     assert backend_env["DATACOPILOT_LOCAL__ENABLED"] == "${LOCAL_MODEL_ENABLED:-false}"
     assert backend_env["DATACOPILOT_LOCAL__BASE_URL"].startswith("${LOCAL_MODEL_BASE_URL")
     assert backend_env["DATACOPILOT_LOCAL__CHAT_MODEL"].startswith("${LOCAL_MODEL_NAME")
+    assert backend_env["DATACOPILOT_VECTOR_STORE__MODE"] == "http"
+    assert backend_env["DATACOPILOT_VECTOR_STORE__HOST"] == "chromadb"
+    assert backend_env["DATACOPILOT_VECTOR_STORE__PORT"] == "8000"
+    assert backend_env["DATACOPILOT_MEMORY__BACKEND"] == "redis"
+    assert backend_env["DATACOPILOT_MEMORY__REDIS_URL"] == "redis://redis:6379/0"
+    assert backend_env["DATACOPILOT_EMBEDDINGS__DEFAULT_MODEL"] == "BAAI/bge-m3"
 
 
 def test_compose_uses_only_project_local_bind_mounts_and_no_anonymous_volumes() -> None:
@@ -43,7 +50,9 @@ def test_compose_uses_only_project_local_bind_mounts_and_no_anonymous_volumes() 
             assert volume["type"] == "bind", f"{service_name} must not use anonymous volumes"
             source = volume["source"]
             assert not Path(source).is_absolute(), f"{service_name} source must be relative"
-            assert source.startswith("./data"), f"{service_name} volume must stay under data/"
+            assert source.startswith(("./data", "./models")), (
+                f"{service_name} volume must stay under data/ or models/"
+            )
 
 
 def test_compose_does_not_embed_host_project_path() -> None:
@@ -72,12 +81,22 @@ def test_compose_resource_limits_match_shared_server_safety_budget() -> None:
 
 def test_compose_has_healthchecks_and_restart_policies() -> None:
     compose = load_compose()
-    for service_name in ("backend", "frontend", "chromadb"):
-        service = compose["services"][service_name]
+    services = compose["services"]
+    for service_name in ("backend", "frontend", "chromadb", "redis"):
+        service = services[service_name]
         assert service["restart"] == "unless-stopped"
         assert "healthcheck" in service
-        assert service["healthcheck"]["interval"] == "30s"
+        expected_interval = "10s" if service_name == "redis" else "30s"
+        assert service["healthcheck"]["interval"] == expected_interval
         assert service["healthcheck"]["retries"] >= 3
+    assert "/health/live" in " ".join(services["backend"]["healthcheck"]["test"])
+    assert services["redis"]["command"] == [
+        "redis-server",
+        "--appendonly",
+        "yes",
+        "--appendfsync",
+        "everysec",
+    ]
 
 
 def test_production_env_file_sets_safe_runtime_defaults_without_secrets() -> None:
@@ -120,6 +139,8 @@ def test_backend_dockerfile_is_production_optimized() -> None:
     assert "DATACOPILOT_GID=1015" in content
     assert "useradd" in content
     assert "pip install --no-cache-dir" in content
+    assert "download.pytorch.org/whl/cpu" in content
+    assert "PYTORCH_VERSION=2.8.0" in content
     assert "backend/requirements.txt" in content
     assert "HEALTHCHECK" in content
     assert "uvicorn" in content

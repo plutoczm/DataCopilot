@@ -10,15 +10,20 @@
     "code": "validation_error",
     "message": "请求参数校验失败",
     "details": []
-  }
+  },
+  "request_id": "7de8d6e0-..."
 }
 ```
 
 ## 健康与配置
 
+### `GET /health/live`
+
+快速 liveness 检查，不调用 LLM 或向量库。启动器和 Docker healthcheck 使用该端点。
+
 ### `GET /health`
 
-检查应用、大模型 Provider 和向量库。
+检查应用、大模型 Provider 和向量库。若知识问答返回 `502`，优先查看 `llm_provider.api_key_configured`、`reachable` 与返回的 `request_id`。
 
 ```bash
 curl http://127.0.0.1:8000/health
@@ -126,11 +131,14 @@ data: {"metadata":{...}}
 
 自动识别意图并执行 RAG、Text2SQL、SQL 审核、数仓设计或通用对话。
 
+传入 `user_id` 后，Agent 会召回该用户的显式长期记忆和规则；`session_id` 用于共享短期消息、摘要和最近一次 Agent state。生产环境必须从认证身份生成 `user_id`。
+
 ```bash
 curl -X POST http://127.0.0.1:8000/api/v1/agent/chat \
   -H "Content-Type: application/json" \
   -d '{
     "message": "统计最近7天活跃用户并检查 SQL",
+    "user_id": "demo-user",
     "session_id": "demo-session",
     "engine": "hive",
     "schema_context": "dwd_user_behavior_detail(user_id bigint, dt string)",
@@ -149,6 +157,7 @@ curl -X POST http://127.0.0.1:8000/api/v1/agent/chat \
   },
   "routing_path": [
     "classify_intent",
+    "planner",
     "text2sql",
     "sql_review",
     "format_response"
@@ -158,7 +167,13 @@ curl -X POST http://127.0.0.1:8000/api/v1/agent/chat \
     "intent_confidence": 0.95,
     "tool_usage": {"text2sql": 1, "sql_review": 1},
     "max_steps": 8,
-    "memory": {"short_term_messages": 2},
+    "memory": {
+      "backend": "redis_chroma",
+      "short_term_messages": 2,
+      "checkpoint_available": true,
+      "rules_loaded": 1,
+      "long_term_memories_recalled": 1
+    },
     "validation": {"total": 2, "errors": 0, "warnings": 0, "ok": 2}
   },
   "token_usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
@@ -169,6 +184,38 @@ curl -X POST http://127.0.0.1:8000/api/v1/agent/chat \
 
 - `result.validation`：`validate_result` 节点的完整校验结果（Text2SQL 分支保留 SQL 级校验 `is_valid`/`issues`；RAG、SQL 审核、数仓设计分支为智能体级校验 `{is_valid, checks, summary}`）。
 - `metadata.validation`：校验摘要 `{total, errors, warnings, ok}`。
+- `metadata.memory`：当前短期记忆、checkpoint 与长期/规则召回统计。
+
+### Agent Memory
+
+三层记忆分别为 Redis AOF 的短期消息/状态、Redis 的规则记忆，以及 ChromaDB+BGE-M3 的显式长期语义记忆。所有用户级操作必须带 `user_id`；正式部署中该值应来自认证系统。
+
+#### 写入长期记忆
+
+```bash
+curl -X POST http://127.0.0.1:8000/api/v1/agent/memory/long-term \
+  -H "Content-Type: application/json" \
+  -d '{"user_id":"demo-user","content":"我偏好 Spark SQL。"}'
+```
+
+#### 写入用户规则
+
+```bash
+curl -X PUT http://127.0.0.1:8000/api/v1/agent/memory/rules/prefer-spark \
+  -H "Content-Type: application/json" \
+  -d '{"scope":"user","user_id":"demo-user","content":"分析任务优先使用 Spark SQL。","priority":500}'
+```
+
+- `POST /api/v1/agent/memory/long-term`：显式写入用户长期记忆。
+- `GET /api/v1/agent/memory/long-term/{user_id}`：列出长期记忆。
+- `DELETE /api/v1/agent/memory/long-term/{user_id}/{memory_id}`：删除长期记忆。
+- `PUT /api/v1/agent/memory/rules/{rule_id}`：新增或更新 global/user 规则。
+- `GET /api/v1/agent/memory/rules?user_id=...`：合并读取全局和用户规则。
+- `DELETE /api/v1/agent/memory/rules/{rule_id}`：删除规则。
+- `GET /api/v1/agent/sessions/{session_id}/state?user_id=...`：读取最近 Agent state。
+- `DELETE /api/v1/agent/sessions/{session_id}?user_id=...`：清理短期记忆和 checkpoint。
+
+长期记忆默认不从普通对话自动提取，只有显式 API 写入，避免错误事实和隐私信息被静默固化。
 
 ### `POST /api/v1/agent/chat/stream`
 
@@ -176,9 +223,11 @@ curl -X POST http://127.0.0.1:8000/api/v1/agent/chat \
 
 ### `DELETE /api/v1/agent/sessions/{session_id}`
 
-清除指定会话的进程内短期记忆和摘要。
+清除指定用户会话的 Redis 短期消息、摘要和最近 Agent checkpoint。Docker 多实例部署时，其他 backend 实例也会立即看到清理结果。
 
 ## 自然语言转 SQL（Text2SQL）
+
+接口只返回只读单语句 SQL。服务会拒绝 DDL/DML、注释、`SELECT INTO` 和多语句，并自动追加或收紧 `LIMIT 500`。项目不连接或执行用户业务数据库。
 
 ### `POST /api/v1/text2sql`
 
@@ -241,4 +290,5 @@ curl -X POST http://127.0.0.1:8000/api/v1/warehouse-design \
 | `404` | 文档或资源不存在 |
 | `422` | Pydantic 参数校验失败 |
 | `500` | 智能体或向量库内部错误 |
+| `503` | Embedding 模型加载或推理不可用 |
 | `502` | 大模型 Provider 调用失败 |

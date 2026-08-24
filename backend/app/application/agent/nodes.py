@@ -49,6 +49,25 @@ class AgentNodes:
             "routing_path": state["routing_path"] + ["classify_intent"],
         }
 
+    async def planner(self, state: AgentState) -> dict[str, Any]:
+        steps_by_intent = {
+            AgentIntent.RAG: ["query_knowledge_base"],
+            AgentIntent.TEXT2SQL: ["generate_sql"],
+            AgentIntent.SQL_REVIEW: ["review_sql"],
+            AgentIntent.TEXT2SQL_SQL_REVIEW: ["generate_sql", "review_sql"],
+            AgentIntent.WAREHOUSE_DESIGN: ["design_data_warehouse"],
+            AgentIntent.GENERAL_CHAT: ["general_chat"],
+            AgentIntent.UNKNOWN: ["fallback_response"],
+        }
+        return {
+            "plan": [
+                *steps_by_intent[state["intent"]],
+                "validate_result",
+                "format_response",
+            ],
+            "routing_path": state["routing_path"] + ["planner"],
+        }
+
     async def rag(self, state: AgentState) -> dict[str, Any]:
         request = state["request"]
         response = await self.toolbox.invoke(
@@ -74,7 +93,7 @@ class AgentNodes:
         response = await self.toolbox.invoke(
             "text2sql",
             {
-                "question": state["query"],
+                "question": self._with_memory_context(state, state["query"]),
                 "engine": request.engine,
                 "schema_context": request.schema_context,
                 "database_name": request.database_name,
@@ -112,7 +131,7 @@ class AgentNodes:
         response = await self.toolbox.invoke(
             "warehouse_design",
             {
-                "requirement": state["query"],
+                "requirement": self._with_memory_context(state, state["query"]),
                 "use_rag": request.use_rag,
                 "rag_collection_name": request.rag_collection_name,
             },
@@ -253,3 +272,9 @@ class AgentNodes:
 
     def _format_sql_review(self, risk_level: str, score: int) -> str:
         return f"SQL review completed. Risk level: {risk_level}. Score: {score}/100."
+
+    def _with_memory_context(self, state: AgentState, value: str) -> str:
+        context = state.get("memory_context", "")
+        if not context:
+            return value
+        return f"{value}\n\nAgent memory context:\n{context}"

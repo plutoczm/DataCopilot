@@ -61,6 +61,7 @@ class DeepSeekProvider:
         *,
         temperature: float | None = None,
         max_tokens: int | None = None,
+        task_type: str | None = None,
     ) -> LLMResponse:
         payload = self._build_payload(
             messages,
@@ -77,6 +78,7 @@ class DeepSeekProvider:
         *,
         temperature: float | None = None,
         max_tokens: int | None = None,
+        task_type: str | None = None,
     ) -> AsyncIterator[LLMStreamChunk]:
         payload = self._build_payload(
             messages,

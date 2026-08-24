@@ -19,6 +19,28 @@ QUALIFIED_COLUMN_PATTERN = re.compile(
     re.IGNORECASE,
 )
 
+FORBIDDEN_KEYWORDS = {
+    "alter",
+    "call",
+    "copy",
+    "create",
+    "delete",
+    "drop",
+    "exec",
+    "execute",
+    "grant",
+    "insert",
+    "load",
+    "merge",
+    "replace",
+    "revoke",
+    "truncate",
+    "unload",
+    "update",
+}
+
+DEFAULT_MAX_ROWS = 500
+
 
 class SQLValidator:
     def validate(
@@ -30,6 +52,8 @@ class SQLValidator:
     ) -> SQLValidationResult:
         issues: list[SQLValidationIssue] = []
         normalized_sql = self._normalize_sql(sql)
+        masked_sql, syntax_issues = self._mask_and_check_syntax(sql)
+        issues.extend(syntax_issues)
 
         if not self._has_valid_structure(normalized_sql):
             issues.append(
@@ -40,7 +64,8 @@ class SQLValidator:
                 )
             )
 
-        issues.extend(self._detect_dangerous_dml(normalized_sql))
+        issues.extend(self._detect_unsafe_statements(masked_sql))
+        issues.extend(self._validate_limit(masked_sql))
         table_aliases, table_issues = self._extract_table_aliases(sql, schema)
         issues.extend(table_issues)
         issues.extend(self._detect_unknown_columns(sql, schema, table_aliases))
@@ -51,6 +76,38 @@ class SQLValidator:
         is_valid = not any(issue.severity == "error" for issue in issues)
         return SQLValidationResult(is_valid=is_valid, issues=issues)
 
+    def enforce_row_limit(self, sql: str, *, max_rows: int = DEFAULT_MAX_ROWS) -> str:
+        if max_rows < 1:
+            raise ValueError("max_rows must be greater than zero")
+        statement = sql.strip().removesuffix(";").rstrip()
+        masked_sql, syntax_issues = self._mask_and_check_syntax(statement)
+        if syntax_issues:
+            return statement
+
+        mysql_limit = re.search(
+            r"\blimit\s+(?P<offset>\d+)\s*,\s*(?P<count>\d+)\s*$",
+            masked_sql,
+            re.IGNORECASE,
+        )
+        if mysql_limit:
+            count = min(int(mysql_limit.group("count")), max_rows)
+            start, end = mysql_limit.span("count")
+            return f"{statement[:start]}{count}{statement[end:]}"
+
+        standard_limit = re.search(
+            r"\blimit\s+(?P<count>\d+)(?:\s+offset\s+\d+)?\s*$",
+            masked_sql,
+            re.IGNORECASE,
+        )
+        if standard_limit:
+            count = min(int(standard_limit.group("count")), max_rows)
+            start, end = standard_limit.span("count")
+            return f"{statement[:start]}{count}{statement[end:]}"
+
+        if re.search(r"\blimit\b", masked_sql, re.IGNORECASE):
+            return statement
+        return f"{statement} LIMIT {max_rows}"
+
     def _normalize_sql(self, sql: str) -> str:
         return re.sub(r"\s+", " ", sql.strip()).lower()
 
@@ -59,25 +116,122 @@ class SQLValidator:
             return False
         return normalized_sql.startswith("select") or normalized_sql.startswith("with")
 
-    def _detect_dangerous_dml(self, normalized_sql: str) -> list[SQLValidationIssue]:
+    def _detect_unsafe_statements(self, masked_sql: str) -> list[SQLValidationIssue]:
         issues: list[SQLValidationIssue] = []
-        if re.search(r"\bdelete\s+from\b", normalized_sql):
+        for keyword in sorted(FORBIDDEN_KEYWORDS):
+            if not re.search(rf"\b{keyword}\b", masked_sql, re.IGNORECASE):
+                continue
+            code = f"dangerous_{keyword}"
             issues.append(
                 SQLValidationIssue(
-                    code="dangerous_delete",
+                    code=code,
                     severity="error",
-                    message="DELETE statements are not allowed.",
+                    message=f"{keyword.upper()} statements are not allowed.",
                 )
             )
-        if re.search(r"\bupdate\s+[a-zA-Z_][\w.]*\b", normalized_sql):
+        if re.search(r"\bselect\b[\s\S]*\binto\b", masked_sql, re.IGNORECASE):
             issues.append(
                 SQLValidationIssue(
-                    code="dangerous_update",
+                    code="dangerous_select_into",
                     severity="error",
-                    message="UPDATE statements are not allowed.",
+                    message="SELECT INTO is not allowed in generated read-only SQL.",
                 )
             )
         return issues
+
+    def _mask_and_check_syntax(
+        self,
+        sql: str,
+    ) -> tuple[str, list[SQLValidationIssue]]:
+        masked = list(sql)
+        issues: list[SQLValidationIssue] = []
+        quote: str | None = None
+        depth = 0
+        index = 0
+        while index < len(sql):
+            char = sql[index]
+            if quote is not None:
+                masked[index] = " "
+                if char == quote:
+                    if index + 1 < len(sql) and sql[index + 1] == quote:
+                        masked[index + 1] = " "
+                        index += 2
+                        continue
+                    quote = None
+                elif char == "\\" and index + 1 < len(sql):
+                    masked[index + 1] = " "
+                    index += 2
+                    continue
+                index += 1
+                continue
+            if char in {"'", '"', "`"}:
+                quote = char
+                masked[index] = " "
+            elif char == "(":
+                depth += 1
+            elif char == ")":
+                depth -= 1
+                if depth < 0:
+                    break
+            index += 1
+
+        if quote is not None or depth != 0:
+            issues.append(
+                SQLValidationIssue(
+                    code="invalid_sql_syntax",
+                    severity="error",
+                    message="SQL contains unbalanced quotes or parentheses.",
+                )
+            )
+
+        masked_sql = "".join(masked)
+        if re.search(r"--|/\*|\*/|#", masked_sql):
+            issues.append(
+                SQLValidationIssue(
+                    code="sql_comments_not_allowed",
+                    severity="error",
+                    message="SQL comments are not allowed in generated queries.",
+                )
+            )
+
+        without_trailing_semicolon = masked_sql.strip().removesuffix(";")
+        if ";" in without_trailing_semicolon:
+            issues.append(
+                SQLValidationIssue(
+                    code="multiple_statements_not_allowed",
+                    severity="error",
+                    message="Only one SQL statement is allowed.",
+                )
+            )
+        if masked_sql.strip().lower().startswith("with") and not re.search(
+            r"\bselect\b", masked_sql, re.IGNORECASE
+        ):
+            issues.append(
+                SQLValidationIssue(
+                    code="invalid_sql_syntax",
+                    severity="error",
+                    message="A WITH query must contain a SELECT statement.",
+                )
+            )
+        return masked_sql, issues
+
+    def _validate_limit(self, masked_sql: str) -> list[SQLValidationIssue]:
+        if not re.search(r"\blimit\b", masked_sql, re.IGNORECASE):
+            return []
+        valid_limit = re.search(
+            r"\blimit\s+\d+(?:(?:\s*,\s*|\s+offset\s+)\d+)?\s*;?\s*$",
+            masked_sql,
+            re.IGNORECASE,
+        )
+        if valid_limit:
+            return []
+        return [
+            SQLValidationIssue(
+                code="invalid_limit",
+                severity="error",
+                message="LIMIT must use a non-negative integer literal at the end of the query.",
+            )
+        ]
 
     def _extract_table_aliases(
         self,

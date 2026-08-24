@@ -37,7 +37,9 @@ ChromaDB 轻量、可本地持久化，适合演示和小团队。项目通过�
 
 ### 1. Agent 如何选择工具？
 
-当前使用确定性意图路由识别 RAG、Text2SQL、SQL 审核、数仓设计、通用对话和组合任务。LangGraph 根据意图进入对应 StructuredTool；组合请求会先生成 SQL，再进入审核节点。
+当前使用确定性意图路由识别 RAG、Text2SQL、SQL 审核、数仓设计、通用对话和组合任务。Planner 将工具、结果校验和响应格式化步骤显式写入状态；LangGraph 再进入对应 StructuredTool，组合请求会先生成 SQL，再进入审核节点。
+
+记忆不是一个进程内字典：Redis AOF 共享短期消息、摘要、最近 Agent state 和优先级规则，ChromaDB+BGE-M3 保存显式长期语义记忆。用两个 memory 实例连接同一 Redis 的测试证明跨实例可见性，并通过 user_id 做逻辑隔离。
 
 ### 2. 如何避免工具参数错误？
 
@@ -53,7 +55,7 @@ ChromaDB 轻量、可本地持久化，适合演示和小团队。项目通过�
 
 ### 5. 上下文和记忆如何管理？
 
-单次任务使用 `AgentState` 工作记忆；同一 `session_id` 保存最近消息；超出窗口的历史压缩为摘要。当前是进程内短期记忆，生产长期记忆应使用 Redis 或数据库并做租户隔离。
+单次任务使用 `AgentState` 工作记忆。Docker 生产模式把 `user_id + session_id` 的短期消息、摘要和最近 Agent checkpoint 放入 Redis AOF；规则记忆也在 Redis 中按 global/user scope 和 priority 合并；显式长期偏好写入 ChromaDB，并由 BGE-M3 按 user_id 语义召回。这样任意 backend 实例都可加载同一会话上下文。当前 `user_id` 只是应用层标识，正式部署仍需要认证与租户隔离。
 
 ### 6. Text2SQL 如何保证质量？
 
@@ -73,7 +75,7 @@ Prompt 包含引擎、Schema 和结构化输出约束；模型输出解析后执
 
 ### 10. 当前项目边界是什么？
 
-已实现完整单 Agent + 专业工具架构、本地 Ollama 和 Docker 部署。持久化长期记忆、真正多 Agent、微调训练、生产数据库执行和企业鉴权属于后续扩展。
+已实现单 Agent + 专业工具架构、真实 BGE-M3、Redis/Chroma 三层记忆、本地 Ollama 和 Docker 部署。BGE-M3 当前接入 dense vector；sparse/ColBERT、多 Agent、生产数据库执行、认证授权和多租户隔离仍属于后续扩展。
 
 ## 演示顺序
 
@@ -81,5 +83,5 @@ Prompt 包含引擎、Schema 和结构化输出约束；模型输出解析后执
 2. 上传 Spark AQE 文档，演示混合检索、引用和低分拒答。
 3. 输入“统计最近7天活跃用户并检查 SQL”，展示多步骤路由。
 4. 输入数仓需求，展示 ODS-DWD-DWS-ADS、指标和 DDL。
-5. 使用同一 `session_id` 连续提问，展示短期记忆和清理接口。
-6. 展示 `135 passed`、Docker Compose 和 Ollama Provider。
+5. 使用同一 `user_id + session_id` 连续提问，展示 Redis 短期记忆、Agent checkpoint、长期记忆和规则接口。
+6. 展示真实 BGE-M3 验证脚本、`212 passed`、Docker Compose 四服务状态和 Ollama Provider。
