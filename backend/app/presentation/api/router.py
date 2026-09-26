@@ -2,6 +2,7 @@ from fastapi import APIRouter
 
 from backend.app.presentation.api.routes import (
     agent,
+    business_analytics,
     chat,
     config,
     health,
@@ -21,3 +22,4 @@ api_router.include_router(text2sql.router)
 api_router.include_router(sql_review.router)
 api_router.include_router(warehouse_design.router)
 api_router.include_router(agent.router)
+api_router.include_router(business_analytics.router)

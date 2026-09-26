@@ -20,6 +20,9 @@ class IntentRouter:
         "查询",
         "生成sql",
         "写sql",
+        "generate sql",
+        "write sql",
+        "sql generation",
         "最近",
         "top",
         "select",
@@ -27,6 +30,35 @@ class IntentRouter:
         "sum",
         "活跃用户",
         "gmv",
+    )
+    BUSINESS_ANALYTICS_PATTERNS = (
+        "orders_v1",
+        "tickets_v1",
+        "ticket_events_v1",
+        "actions_v1",
+        "order status",
+        "order amount",
+        "refundable amount",
+        "refund status",
+        "return status",
+        "ticket priority",
+        "unresolved ticket",
+        "ticket sla",
+        "action status",
+        "quoted amount",
+        "工单",
+        "退款",
+        "退货",
+        "订单状态",
+        "订单金额",
+        "可退款金额",
+        "退款状态",
+        "退货状态",
+        "工单优先级",
+        "未解决工单",
+        "工单sla",
+        "操作状态",
+        "报价金额",
     )
     WAREHOUSE_PATTERNS = (
         "数仓",
@@ -67,6 +99,10 @@ class IntentRouter:
         normalized = self._normalize(query)
         has_sql_review = self._contains_any(normalized, self.SQL_REVIEW_PATTERNS)
         has_text2sql = self._contains_any(normalized, self.TEXT2SQL_PATTERNS)
+        has_business_analytics = self._contains_any(
+            normalized,
+            self.BUSINESS_ANALYTICS_PATTERNS,
+        )
         has_warehouse = self._contains_any(normalized, self.WAREHOUSE_PATTERNS)
         has_general = self._contains_any(normalized, self.GENERAL_PATTERNS)
         has_rag = self._contains_any(normalized, self.RAG_PATTERNS)
@@ -90,6 +126,12 @@ class IntentRouter:
                 intent=AgentIntent.WAREHOUSE_DESIGN,
                 confidence=0.94,
                 reason="Request contains warehouse design terminology.",
+            )
+        if has_business_analytics:
+            return IntentClassification(
+                intent=AgentIntent.BUSINESS_ANALYTICS,
+                confidence=0.98,
+                reason="Request matches a governed business-data subject area.",
             )
         if has_text2sql:
             return IntentClassification(
@@ -118,6 +160,7 @@ class IntentRouter:
     def route_key(self, intent: AgentIntent) -> str:
         return {
             AgentIntent.RAG: "rag",
+            AgentIntent.BUSINESS_ANALYTICS: "business_analytics",
             AgentIntent.TEXT2SQL: "text2sql",
             AgentIntent.SQL_REVIEW: "sql_review",
             AgentIntent.TEXT2SQL_SQL_REVIEW: "text2sql",
@@ -135,7 +178,14 @@ class IntentRouter:
         return re.sub(r"\s+", " ", query.strip().lower())
 
     def _contains_any(self, query: str, patterns: tuple[str, ...]) -> bool:
-        return any(pattern in query for pattern in patterns)
+        for pattern in patterns:
+            if pattern.isascii() and any(character.isalnum() for character in pattern):
+                boundary_pattern = r"(?<![a-z0-9])" + re.escape(pattern) + r"(?![a-z0-9])"
+                if re.search(boundary_pattern, query):
+                    return True
+            elif pattern in query:
+                return True
+        return False
 
     def _contains_sql(self, query: str) -> bool:
         return bool(

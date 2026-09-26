@@ -9,6 +9,7 @@ from backend.app.domain.ports.llm_provider import LLMUsage
 
 class AgentIntent(StrEnum):
     RAG = "RAG"
+    BUSINESS_ANALYTICS = "BUSINESS_ANALYTICS"
     TEXT2SQL = "TEXT2SQL"
     SQL_REVIEW = "SQL_REVIEW"
     TEXT2SQL_SQL_REVIEW = "TEXT2SQL_SQL_REVIEW"
@@ -40,6 +41,7 @@ class AgentRequest(BaseModel):
     metadata_filter: dict[str, str | int | float | bool] | None = None
     score_threshold: float | None = Field(default=None, ge=0.0, le=1.0)
     engine: SQLEngine = SQLEngine.HIVE
+    requested_datasets: tuple[str, ...] = ()
     schema_context: str | None = None
     database_name: str | None = None
     use_rag: bool = False

@@ -44,6 +44,8 @@ flowchart LR
 - DeepSeek 异步调用，包含超时、有限重试、流式输出、健康检查和 Token 统计。
 - 可切换到 Ollama 本地模型。
 - 支持 Hive、Spark SQL、MySQL 和 ClickHouse 的 Text2SQL。
+- Managed Business Analytics 在 D1-D4 上增加了 D5 配置型身份验证、单 tenant grant、认证 API 和 Agent 能力；默认未配置生产 IdP 或 tenant grants（[D5 集成边界](docs/TRUSTED_BUSINESS_ANALYTICS_INTEGRATION.md)）。
+- 提供内部 governed snapshot execution foundation：独立校验 Delivery v2、隔离 tenant snapshot、限制 SQL 结果；[D4 执行边界](docs/GOVERNED_BUSINESS_ANALYTICS_EXECUTION.md)。
 - Text2SQL 仅生成只读单语句，拦截 DDL/DML、注释与多语句，并自动将结果限制在 500 行以内。
 - SQL 风险评分、规则检查、性能建议和大模型解释。
 - 生成 ODS、DWD、DWS、ADS、维度表、事实表、DDL 和指标定义。
@@ -179,7 +181,7 @@ python -m pytest --cov=backend --cov=frontend --cov-report=term-missing
 python -m pytest -q tests/evaluation/test_rag_quality.py
 ```
 
-最近一次验证（2026-08-24）：`212 passed`。测试数量会随工程演进变化，以本地 `pytest` 输出为准。
+最近一次验证（2026-09-26，P0 release-candidate baseline）：`492 passed`。测试数量会随工程演进变化，以本地 `pytest` 输出为准。
 
 首次验证真实模型（会下载约 3 GB 模型文件）：
 
@@ -208,8 +210,23 @@ docker compose --env-file docker/.env.production up -d --force-recreate backend
 - [技术栈说明](docs/AGENT_TECH_STACK.md)
 - [系统架构](docs/ARCHITECTURE.md)
 - [接口参考](docs/API_REFERENCE.md)
+- [Managed Business Analytics 边界](docs/BUSINESS_ANALYTICS_BOUNDARY.md)
+- [Trusted Business Analytics Integration (D5)](docs/TRUSTED_BUSINESS_ANALYTICS_INTEGRATION.md)
+- [Business Data Contract consumer](docs/BUSINESS_DATA_CONTRACT_CONSUMER.md)
 - [部署指南](docs/DEPLOYMENT.md)
 - [面试讲解](docs/INTERVIEW_GUIDE.md)
 - [路线图](docs/ROADMAP.md)
 - [变更记录](docs/CHANGELOG.md)
 - [发布检查清单](RELEASE_CHECKLIST.md)
+
+## Managed Business Text2SQL (D3)
+
+The D3 foundation renders a trusted, scoped Business Data Contract catalog, generates an untrusted SQL candidate through the existing Text2SQL service adapter, and authorizes the candidate with dialect-aware AST and structural checks. It returns a `READY` plan only; it does not execute SQL, ingest SupportOps delivery rows, or connect a production Agent or warehouse. See [the D3 pipeline boundary](docs/MANAGED_TEXT2SQL_PIPELINE.md).
+
+## Governed Snapshot Execution (D4)
+
+D4 adds an internal Delivery v2 consumer, tenant-scoped in-memory snapshot, translated-SQL reauthorization, and bounded `EXECUTED` result. D5 adds the authenticated API and Agent entrypoints around this workflow. No production IdP, RLS, signed producer delivery, or live SupportOps connection is configured. See [the D4 execution boundary](docs/GOVERNED_BUSINESS_ANALYTICS_EXECUTION.md).
+
+## Trusted Business Analytics Integration (D5)
+
+D5 adds a pinned PyJWT RS256/JWKS verification boundary, server-configured subject-to-tenant grants, authenticated managed query and Agent routes, and a deterministic 50-case enterprise analytics evaluation. Generic Text2SQL remains a separate workflow. D5 does not claim production SSO or database RLS. See [the integration boundary](docs/TRUSTED_BUSINESS_ANALYTICS_INTEGRATION.md).

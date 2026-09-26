@@ -16,6 +16,11 @@ from backend.app.application.agent.nodes import AgentNodes
 from backend.app.application.agent.router import IntentRouter
 from backend.app.application.agent.state import AgentState
 from backend.app.application.agent.tools import AgentToolbox
+from backend.app.application.agent.tools import BusinessAnalyticsAgentToolInput
+from backend.app.application.agent.business_analytics_adapter import (
+    BusinessAnalyticsAgentAdapter,
+)
+from backend.app.application.identity.models import AgentExecutionContext
 from backend.app.application.rag.rag_service import RAGService
 from backend.app.application.sql_review.sql_review_service import SQLReviewService
 from backend.app.application.text2sql.text2sql_service import Text2SQLService
@@ -37,6 +42,7 @@ class AgentGraph:
         llm_provider: LLMProvider,
         intent_router: IntentRouter | None = None,
         memory: AgentMemory | None = None,
+        business_analytics_adapter: BusinessAnalyticsAgentAdapter | None = None,
         max_steps: int = 8,
     ) -> None:
         self.intent_router = intent_router or IntentRouter()
@@ -54,14 +60,24 @@ class AgentGraph:
             warehouse_design_service=warehouse_design_service,
             llm_provider=llm_provider,
             toolbox=self.toolbox,
+            business_analytics_adapter=business_analytics_adapter,
         )
         self.memory = memory or ConversationMemory()
         self.max_steps = max_steps
         self.logger = get_logger("datacopilot.agent")
         self._graph = self._build_graph()
 
-    async def run(self, request: AgentRequest) -> AgentResponse:
+    async def run(
+        self,
+        request: AgentRequest,
+        *,
+        execution_context: AgentExecutionContext | None = None,
+    ) -> AgentResponse:
         started_at = time.perf_counter()
+        if execution_context is not None:
+            request = request.model_copy(
+                update={"user_id": execution_context.memory_user_id}
+            )
         memory_stats: dict[str, Any] = {}
         memory_errors: list[str] = []
         memory_messages: list[dict[str, str]] = []
@@ -98,7 +114,12 @@ class AgentGraph:
         request = request.model_copy(
             update={"history": [*memory_messages, *request.history]}
         )
-        initial_state = self._initial_state(request, memory_context, memory_errors)
+        initial_state = self._initial_state(
+            request,
+            memory_context,
+            memory_errors,
+            execution_context=execution_context,
+        )
         try:
             state = await self._graph.ainvoke(
                 initial_state,
@@ -136,6 +157,8 @@ class AgentGraph:
                 "validation": state.get("validation", {}).get("summary", {}),
             },
         )
+        if execution_context is not None:
+            response.metadata["request_id"] = execution_context.request_id
         if request.session_id:
             try:
                 self.memory.append_turn(
@@ -185,8 +208,13 @@ class AgentGraph:
         )
         return response
 
-    async def stream(self, request: AgentRequest) -> AsyncIterator[dict[str, Any]]:
-        response = await self.run(request)
+    async def stream(
+        self,
+        request: AgentRequest,
+        *,
+        execution_context: AgentExecutionContext | None = None,
+    ) -> AsyncIterator[dict[str, Any]]:
+        response = await self.run(request, execution_context=execution_context)
         yield {
             "event": "metadata",
             "data": {
@@ -208,7 +236,20 @@ class AgentGraph:
         yield {"event": "done", "data": {"status": "complete"}}
 
     def tool_catalog(self) -> list[dict[str, Any]]:
-        return self.toolbox.catalog()
+        catalog = self.toolbox.catalog()
+        if self.nodes.business_analytics_adapter is not None:
+            catalog.append(
+                {
+                    "key": "business_analytics",
+                    "name": "run_governed_business_analytics",
+                    "description": (
+                        "Run bounded analytics over the authenticated tenant's "
+                        "approved business datasets."
+                    ),
+                    "input_schema": BusinessAnalyticsAgentToolInput.model_json_schema(),
+                }
+            )
+        return catalog
 
     def clear_memory(self, session_id: str, *, user_id: str | None = None) -> bool:
         return self.memory.clear(session_id, user_id=user_id)
@@ -260,6 +301,7 @@ class AgentGraph:
         graph.add_node("classify_intent", self.nodes.classify_intent)
         graph.add_node("planner", self.nodes.planner)
         graph.add_node("rag", self.nodes.rag)
+        graph.add_node("business_analytics", self.nodes.business_analytics)
         graph.add_node("text2sql", self.nodes.text2sql)
         graph.add_node("sql_review", self.nodes.sql_review)
         graph.add_node("warehouse_design", self.nodes.warehouse_design)
@@ -275,6 +317,7 @@ class AgentGraph:
             self._route_from_classification,
             {
                 "rag": "rag",
+                "business_analytics": "business_analytics",
                 "text2sql": "text2sql",
                 "sql_review": "sql_review",
                 "warehouse_design": "warehouse_design",
@@ -290,7 +333,14 @@ class AgentGraph:
                 "validate_result": "validate_result",
             },
         )
-        for node_name in ("rag", "sql_review", "warehouse_design", "general_chat", "unknown"):
+        for node_name in (
+            "rag",
+            "business_analytics",
+            "sql_review",
+            "warehouse_design",
+            "general_chat",
+            "unknown",
+        ):
             graph.add_edge(node_name, "validate_result")
         graph.add_edge("validate_result", "format_response")
         graph.add_edge("format_response", END)
@@ -307,9 +357,12 @@ class AgentGraph:
         request: AgentRequest,
         memory_context: str = "",
         memory_errors: list[str] | None = None,
+        *,
+        execution_context: AgentExecutionContext | None = None,
     ) -> AgentState:
         return {
             "request": request,
+            "execution_context": execution_context,
             "query": request.message,
             "intent": AgentIntent.UNKNOWN,
             "confidence": 0.0,
