@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import shutil
 from pathlib import Path
 
@@ -443,6 +444,24 @@ def test_consumer_rejects_symlinked_dataset_file(
         return path == orders_path or original_is_symlink(path)
 
     monkeypatch.setattr(Path, "is_symlink", detect_symlink)
+
+    context = make_context()
+    with pytest.raises(BusinessDataIntegrityError):
+        make_consumer(delivery).validate(
+            context=context,
+            catalog=make_effective_catalog(context),
+            policy=GovernedExecutionPolicy(),
+        )
+
+
+@pytest.mark.skipif(os.name == "nt", reason="real POSIX symlink integration requires a POSIX runner")
+def test_consumer_rejects_real_symlinked_dataset_file(tmp_path: Path) -> None:
+    delivery = copy_fixture(tmp_path)
+    orders_path = delivery / "orders_v1.jsonl"
+    target_path = tmp_path / "outside-orders.jsonl"
+    target_path.write_bytes(orders_path.read_bytes())
+    orders_path.unlink()
+    orders_path.symlink_to(target_path)
 
     context = make_context()
     with pytest.raises(BusinessDataIntegrityError):
