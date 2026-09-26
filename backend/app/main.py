@@ -24,6 +24,12 @@ def create_app() -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+        if settings.identity.enabled and settings.business_analytics.enabled:
+            from backend.app.presentation.api.dependencies.business_analytics import (
+                get_trusted_analytics_runtime,
+            )
+
+            get_trusted_analytics_runtime()
         if logger is not None:
             logger.info(
                 "Application startup",
@@ -54,6 +60,7 @@ def create_app() -> FastAPI:
             {"name": "SQL Review", "description": "SQL 质量、风险与优化审核接口。"},
             {"name": "Warehouse Design", "description": "分层数仓设计生成接口。"},
             {"name": "Agent", "description": "统一 LangGraph 智能体路由接口。"},
+            {"name": "Business Analytics", "description": "认证后的受管企业数据分析。"},
         ],
     )
     logger = setup_fastapi_logging(app, settings)
@@ -90,7 +97,14 @@ def create_app() -> FastAPI:
                 error=ErrorDetail(
                     code="validation_error",
                     message="请求参数校验失败",
-                    details=[dict(error) for error in exc.errors()],
+                    details=[
+                        {
+                            key: error[key]
+                            for key in ("type", "loc", "msg")
+                            if key in error
+                        }
+                        for error in exc.errors()
+                    ],
                 ),
                 request_id=_request_id(request),
             ).model_dump(mode="json"),

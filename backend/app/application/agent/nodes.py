@@ -4,7 +4,14 @@ from typing import Any
 from backend.app.application.agent.models import AgentIntent
 from backend.app.application.agent.router import IntentRouter
 from backend.app.application.agent.state import AgentState
-from backend.app.application.agent.tools import AgentToolbox
+from backend.app.application.agent.tools import (
+    AgentToolbox,
+    BusinessAnalyticsAgentToolInput,
+)
+from backend.app.application.agent.business_analytics_adapter import (
+    BusinessAnalyticsAgentAdapter,
+)
+from backend.app.application.business_analytics.errors import BusinessAnalyticsError
 from backend.app.application.agent.validation import ResultValidator
 from backend.app.application.rag.rag_service import RAGService
 from backend.app.application.sql_review.sql_review_service import SQLReviewService
@@ -24,6 +31,7 @@ class AgentNodes:
         warehouse_design_service: WarehouseDesignService,
         llm_provider: LLMProvider,
         toolbox: AgentToolbox | None = None,
+        business_analytics_adapter: BusinessAnalyticsAgentAdapter | None = None,
         result_validator: ResultValidator | None = None,
     ) -> None:
         self.intent_router = intent_router
@@ -39,6 +47,7 @@ class AgentNodes:
             sql_review_service=sql_review_service,
             warehouse_design_service=warehouse_design_service,
         )
+        self.business_analytics_adapter = business_analytics_adapter
 
     async def classify_intent(self, state: AgentState) -> dict[str, Any]:
         classification = self.intent_router.classify(state["query"])
@@ -52,6 +61,7 @@ class AgentNodes:
     async def planner(self, state: AgentState) -> dict[str, Any]:
         steps_by_intent = {
             AgentIntent.RAG: ["query_knowledge_base"],
+            AgentIntent.BUSINESS_ANALYTICS: ["run_governed_business_analytics"],
             AgentIntent.TEXT2SQL: ["generate_sql"],
             AgentIntent.SQL_REVIEW: ["review_sql"],
             AgentIntent.TEXT2SQL_SQL_REVIEW: ["generate_sql", "review_sql"],
@@ -106,6 +116,50 @@ class AgentNodes:
             "routing_path": state["routing_path"] + ["text2sql"],
             "token_usage": self._add_usage(state["token_usage"], response.token_usage),
             "tool_usage": self._increment_tool(state["tool_usage"], "text2sql"),
+        }
+
+    async def business_analytics(self, state: AgentState) -> dict[str, Any]:
+        context = state.get("execution_context")
+        if self.business_analytics_adapter is None or context is None:
+            data = {
+                "status": "denied",
+                "code": "authenticated_tenant_context_required",
+            }
+        else:
+            request = state["request"]
+            try:
+                tool_input = BusinessAnalyticsAgentToolInput(
+                    question=state["query"],
+                    engine=request.engine,
+                    requested_datasets=request.requested_datasets,
+                )
+                result = await self.business_analytics_adapter.execute(
+                    tool_input,
+                    execution_context=context,
+                )
+                data = {
+                    "status": result.status.value,
+                    "columns": [column.model_dump(mode="json") for column in result.columns],
+                    "rows": [list(row) for row in result.rows],
+                    "row_count": result.row_count,
+                    "currency": result.snapshot.currency,
+                    "freshness": [
+                        dataset.model_dump(mode="json")
+                        for dataset in result.snapshot.datasets
+                    ],
+                    "result_classification": result.result_classification.value,
+                    "query_fingerprint": result.query_fingerprint,
+                    "contract_version": result.contract_version,
+                    "snapshot_id": result.snapshot.snapshot_id,
+                }
+            except BusinessAnalyticsError as exc:
+                data = {"status": "failed", "code": exc.code}
+            except Exception:
+                data = {"status": "failed", "code": "business_analytics_unavailable"}
+        return {
+            "business_analytics_result": data,
+            "routing_path": state["routing_path"] + ["business_analytics"],
+            "tool_usage": self._increment_tool(state["tool_usage"], "business_analytics"),
         }
 
     async def sql_review(self, state: AgentState) -> dict[str, Any]:
@@ -178,6 +232,17 @@ class AgentNodes:
             rag_response = state["retrieved_context"]
             result = rag_response.model_dump(mode="json")
             final_response = rag_response.answer
+        elif intent is AgentIntent.BUSINESS_ANALYTICS:
+            result = dict(state["business_analytics_result"])
+            if result.get("status") != "executed":
+                final_response = "Business analytics requires authenticated tenant access."
+            else:
+                columns = [column["name"] for column in result["columns"]]
+                final_response = (
+                    f"Data result: {result['row_count']} row(s), "
+                    f"currency {result['currency']}, columns {columns}. "
+                    "Bounded rows and snapshot freshness are in the structured result."
+                )
         elif intent is AgentIntent.TEXT2SQL:
             generated = state["generated_sql"]
             result = generated.model_dump(mode="json")

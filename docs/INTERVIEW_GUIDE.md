@@ -84,4 +84,4 @@ Prompt 包含引擎、Schema 和结构化输出约束；模型输出解析后执
 3. 输入“统计最近7天活跃用户并检查 SQL”，展示多步骤路由。
 4. 输入数仓需求，展示 ODS-DWD-DWS-ADS、指标和 DDL。
 5. 使用同一 `user_id + session_id` 连续提问，展示 Redis 短期记忆、Agent checkpoint、长期记忆和规则接口。
-6. 展示真实 BGE-M3 验证脚本、`212 passed`、Docker Compose 四服务状态和 Ollama Provider。
+6. 展示 BGE-M3 验证脚本、当前测试基线（RC1：`492 passed`；数量随仓库版本变化）、Docker Compose 状态（以实际环境验证为准）和 Ollama Provider。

@@ -11,6 +11,7 @@ from backend.app.application.text2sql.models import SQLEngine, Text2SQLResult
 from backend.app.application.text2sql.text2sql_service import Text2SQLService
 from backend.app.application.warehouse_design.design_service import WarehouseDesignService
 from backend.app.application.warehouse_design.models import WarehouseDesignResult
+from backend.app.application.business_analytics.models import BusinessAnalyticsRequest
 
 
 class RAGToolInput(BaseModel):
@@ -41,6 +42,10 @@ class WarehouseDesignToolInput(BaseModel):
     requirement: str = Field(min_length=1)
     use_rag: bool = False
     rag_collection_name: str = "knowledge_base"
+
+
+class BusinessAnalyticsAgentToolInput(BusinessAnalyticsRequest):
+    """Model-visible analytics fields only; trusted context is injected by the server."""
 
 
 class AgentToolbox:

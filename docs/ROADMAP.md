@@ -15,6 +15,12 @@
 - OpenAI 兼容 Provider：统一 OpenAI 云端与 Ollama 本地 OpenAI 兼容接口。
 - Docker Compose、健康检查、资源限制和项目内持久化。
 - 单元、接口、基础设施、部署和集成测试。
+- DataCopilot D1 = COMPLETE — Workflow / Agent Boundary：建立可信上下文、业务目录 port 和 scope preparation；没有消费 Contract、生成或执行 SQL。
+- DataCopilot D2 = COMPLETE — Business Data Contract Consumer：接受并 pin v1 JSON artifact，通过 strict infrastructure adapter 映射 typed catalog；没有读取 Delivery JSONL 或生成/执行 SQL。
+- DataCopilot D3 = COMPLETE — deterministic managed Text2SQL plan generation; no query execution.
+- DataCopilot D4 = COMPLETE — internal governed snapshot execution foundation.
+- DataCopilot D5 = COMPLETE — trusted identity boundary, tenant grants, authenticated managed API/Agent capability, and deterministic 50-case evaluation.
+- Recommended next stage after RC review: Production Validation P1 — Push / Pull Request / GitHub CI + Real IdP Deployment Validation.
 
 ## 近期规划
 

@@ -25,6 +25,7 @@ RUN pip install --no-cache-dir --upgrade pip \
     && pip install --no-cache-dir -r /app/backend/requirements.txt
 
 COPY backend /app/backend
+COPY contracts /app/contracts
 
 RUN mkdir -p /app/data/chromadb /app/data/uploads /app/data/logs /app/data/cache \
     /app/data/embeddings /app/data/temp /app/models \

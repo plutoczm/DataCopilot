@@ -1,6 +1,6 @@
 from enum import StrEnum
 from pathlib import Path
-from typing import Any, Self
+from typing import Any, Literal, Self
 
 from pydantic import (
     AnyHttpUrl,
@@ -167,6 +167,39 @@ class AgentSettings(BaseModel):
     memory_summary_chars: int = Field(default=1200, ge=200, le=10000)
 
 
+class TrustedIdentitySettings(BaseModel):
+    enabled: bool = False
+    issuer: AnyHttpUrl | None = None
+    audience: str | None = Field(default=None, min_length=1, max_length=512)
+    jwks_url: AnyHttpUrl | None = None
+    allowed_algorithms: tuple[Literal["RS256"], ...] = ("RS256",)
+    clock_skew_seconds: int = Field(default=30, ge=0, le=60)
+    max_bearer_token_bytes: int = Field(default=8192, ge=512, le=16_384)
+    jwks_cache_seconds: int = Field(default=300, ge=1, le=3600)
+    jwks_timeout_seconds: float = Field(default=2.0, gt=0, le=5)
+
+    @field_validator("issuer", "audience", "jwks_url", mode="before")
+    @classmethod
+    def normalize_empty_optional_identity_values(cls, value: Any) -> Any:
+        return None if value == "" else value
+
+    @model_validator(mode="after")
+    def validate_enabled_identity_provider(self) -> Self:
+        if self.allowed_algorithms != ("RS256",):
+            raise ValueError("trusted identity currently requires the RS256 algorithm")
+        if self.enabled and not (self.issuer and self.audience and self.jwks_url):
+            raise ValueError("enabled trusted identity requires issuer, audience and JWKS URL")
+        return self
+
+
+class BusinessAnalyticsRuntimeSettings(BaseModel):
+    enabled: bool = False
+    tenant_grants_json: str = Field(default="[]", repr=False, exclude=True)
+    tenant_delivery_directories_json: str = Field(default="{}", repr=False, exclude=True)
+    contract_relative_path: str = "contracts/external/business_data/v1/contract.json"
+    acceptance_relative_path: str = "contracts/external/business_data/v1/acceptance.json"
+
+
 class MemorySettings(BaseModel):
     backend: str = Field(default="in_memory", pattern="^(in_memory|redis)$")
     redis_url: str = "redis://127.0.0.1:6379/0"
@@ -295,6 +328,10 @@ class Settings(BaseSettings):
     vector_store: VectorStoreSettings = Field(default_factory=VectorStoreSettings)
     rag: RAGSettings = Field(default_factory=RAGSettings)
     agent: AgentSettings = Field(default_factory=AgentSettings)
+    identity: TrustedIdentitySettings = Field(default_factory=TrustedIdentitySettings)
+    business_analytics: BusinessAnalyticsRuntimeSettings = Field(
+        default_factory=BusinessAnalyticsRuntimeSettings
+    )
     memory: MemorySettings = Field(default_factory=MemorySettings)
     health: HealthSettings = Field(default_factory=HealthSettings)
     deepseek: DeepSeekSettings = Field(default_factory=DeepSeekSettings)
@@ -378,6 +415,16 @@ class Settings(BaseSettings):
     def validate_environment_safety(self) -> Self:
         if self.environment is Environment.PRODUCTION and self.debug:
             raise ValueError("debug must be false in production")
+        if self.business_analytics.enabled and not self.identity.enabled:
+            raise ValueError("managed business analytics requires trusted identity")
+        if self.environment is Environment.PRODUCTION and self.identity.enabled:
+            if (
+                not self.identity.issuer
+                or not str(self.identity.issuer).startswith("https://")
+                or not self.identity.jwks_url
+                or not str(self.identity.jwks_url).startswith("https://")
+            ):
+                raise ValueError("production identity issuer and JWKS URL must use HTTPS")
         return self
 
 

@@ -41,6 +41,10 @@ jobs:
         run: |
           python -m pytest -v
 
+      - name: Run deterministic enterprise analytics evaluation
+        run: |
+          python -m tests.evaluation.run_business_analytics_evaluation
+
       - name: Run coverage
         run: |
           python -m pytest --cov=backend --cov=frontend --cov-report=term-missing --cov-fail-under=85

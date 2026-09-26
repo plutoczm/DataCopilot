@@ -200,6 +200,13 @@ def get_agent_graph() -> AgentGraph:
     global _agent_graph
     if _agent_graph is None:
         settings = get_app_settings()
+        business_analytics_adapter = None
+        if settings.identity.enabled and settings.business_analytics.enabled:
+            from backend.app.presentation.api.dependencies.business_analytics import (
+                get_trusted_analytics_runtime,
+            )
+
+            business_analytics_adapter = get_trusted_analytics_runtime().agent_adapter
         _agent_graph = AgentGraph(
             rag_service=get_rag_service(),
             text2sql_service=get_text2sql_service(),
@@ -207,6 +214,7 @@ def get_agent_graph() -> AgentGraph:
             warehouse_design_service=get_warehouse_design_service(),
             llm_provider=_task_bound(get_llm_provider(settings), TaskType.GENERAL_CHAT),
             memory=get_agent_memory(),
+            business_analytics_adapter=business_analytics_adapter,
             max_steps=settings.agent.max_steps,
         )
     return _agent_graph
