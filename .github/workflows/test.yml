@@ -129,7 +129,23 @@ jobs:
               assert error.code == 401, error.code
           else:
               raise AssertionError("unauthenticated managed query was accepted")
-          print("health=PASS openapi_bearer=PASS request_schema=PASS unauthenticated_query=401")
+
+          invalid_bearer = urllib.request.Request(
+              "http://127.0.0.1:8000/api/v1/business-analytics/query",
+              data=b'{"question":"orders"}',
+              headers={
+                  "Authorization": "Bearer not-a-jwt",
+                  "Content-Type": "application/json",
+              },
+              method="POST",
+          )
+          try:
+              invalid_response = urllib.request.urlopen(invalid_bearer, timeout=10)
+              invalid_status = invalid_response.status
+          except urllib.error.HTTPError as error:
+              invalid_status = error.code
+          assert invalid_status != 200, invalid_status
+          print("health=PASS openapi_bearer=PASS request_schema=PASS unauthenticated_query=401 invalid_bearer=NOT_200")
           PY
 
       - name: Stop smoke container
